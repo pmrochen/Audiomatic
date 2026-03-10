@@ -10,7 +10,7 @@ public static class LibraryManager
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Audiomatic");
     private static readonly string DbPath = Path.Combine(DbDir, "library.db");
 
-    private static readonly string[] AudioExtensions =
+    public static readonly string[] AudioExtensions =
         [".mp3", ".flac", ".wav", ".ogg", ".aac", ".wma", ".m4a", ".opus", ".aiff", ".ape"];
 
     private static string ConnectionString => $"Data Source={DbPath}";
@@ -415,6 +415,18 @@ public static class LibraryManager
         cmd.ExecuteNonQuery();
     }
 
+    public static void RenamePlaylist(long playlistId, string newName)
+    {
+        using var conn = new SqliteConnection(ConnectionString);
+        conn.Open();
+        EnablePragmas(conn);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE playlists SET name = @name WHERE id = @id;";
+        cmd.Parameters.AddWithValue("@name", newName);
+        cmd.Parameters.AddWithValue("@id", playlistId);
+        cmd.ExecuteNonQuery();
+    }
+
     public static List<PlaylistInfo> GetPlaylists()
     {
         using var conn = new SqliteConnection(ConnectionString);
@@ -451,6 +463,18 @@ public static class LibraryManager
         cmd.ExecuteNonQuery();
     }
 
+    public static void RemoveTrackFromPlaylist(long playlistId, long trackId)
+    {
+        using var conn = new SqliteConnection(ConnectionString);
+        conn.Open();
+        EnablePragmas(conn);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM playlist_tracks WHERE playlist_id = @pid AND track_id = @tid;";
+        cmd.Parameters.AddWithValue("@pid", playlistId);
+        cmd.Parameters.AddWithValue("@tid", trackId);
+        cmd.ExecuteNonQuery();
+    }
+
     public static List<TrackInfo> GetPlaylistTracks(long playlistId)
     {
         using var conn = new SqliteConnection(ConnectionString);
@@ -469,6 +493,67 @@ public static class LibraryManager
             """;
         cmd.Parameters.AddWithValue("@pid", playlistId);
         return ReadTracks(cmd);
+    }
+
+    public static void MoveTrackInPlaylist(long playlistId, int fromPosition, int toPosition)
+    {
+        using var conn = new SqliteConnection(ConnectionString);
+        conn.Open();
+        EnablePragmas(conn);
+        using var tx = conn.BeginTransaction();
+
+        // Get ordered track IDs
+        using var selectCmd = conn.CreateCommand();
+        selectCmd.CommandText = "SELECT track_id FROM playlist_tracks WHERE playlist_id = @pid ORDER BY position;";
+        selectCmd.Parameters.AddWithValue("@pid", playlistId);
+        var trackIds = new List<long>();
+        using (var reader = selectCmd.ExecuteReader())
+        {
+            while (reader.Read())
+                trackIds.Add(reader.GetInt64(0));
+        }
+
+        if (fromPosition < 0 || fromPosition >= trackIds.Count) return;
+        toPosition = Math.Clamp(toPosition, 0, trackIds.Count - 1);
+        if (fromPosition == toPosition) return;
+
+        var trackId = trackIds[fromPosition];
+        trackIds.RemoveAt(fromPosition);
+        trackIds.Insert(toPosition, trackId);
+
+        // Rewrite all positions
+        using var updateCmd = conn.CreateCommand();
+        updateCmd.CommandText = "UPDATE playlist_tracks SET position = @pos WHERE playlist_id = @pid AND track_id = @tid;";
+        var posParam = updateCmd.Parameters.Add("@pos", SqliteType.Integer);
+        updateCmd.Parameters.AddWithValue("@pid", playlistId);
+        var tidParam = updateCmd.Parameters.Add("@tid", SqliteType.Integer);
+        updateCmd.Prepare();
+
+        for (int i = 0; i < trackIds.Count; i++)
+        {
+            posParam.Value = i + 1;
+            tidParam.Value = trackIds[i];
+            updateCmd.ExecuteNonQuery();
+        }
+
+        tx.Commit();
+    }
+
+    // ── Reset ────────────────────────────────────────────────
+
+    public static void ResetLibrary()
+    {
+        using var conn = new SqliteConnection(ConnectionString);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            DELETE FROM playlist_tracks;
+            DELETE FROM playlists;
+            DELETE FROM favorites;
+            DELETE FROM tracks;
+            DELETE FROM folders;
+            """;
+        cmd.ExecuteNonQuery();
     }
 
     // ── Full rescan ──────────────────────────────────────────

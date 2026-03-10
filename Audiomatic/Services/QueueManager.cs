@@ -100,6 +100,40 @@ public sealed class QueueManager
         QueueChanged?.Invoke();
     }
 
+    public void MoveInQueue(int fromIndex, int toIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= _playQueue.Count) return;
+        toIndex = Math.Clamp(toIndex, 0, _playQueue.Count - 1);
+        if (fromIndex == toIndex) return;
+
+        var track = _playQueue[fromIndex];
+        _playQueue.RemoveAt(fromIndex);
+        _playQueue.Insert(toIndex, track);
+        _originalQueue = [.. _playQueue];
+
+        if (_currentIndex == fromIndex)
+            _currentIndex = toIndex;
+        else if (fromIndex < _currentIndex && toIndex >= _currentIndex)
+            _currentIndex--;
+        else if (fromIndex > _currentIndex && toIndex <= _currentIndex)
+            _currentIndex++;
+
+        QueueChanged?.Invoke();
+    }
+
+    public void ReorderQueue(List<TrackInfo> newOrder)
+    {
+        var current = CurrentTrack;
+        _playQueue = [.. newOrder];
+        _originalQueue = [.. newOrder];
+        if (current != null)
+        {
+            _currentIndex = _playQueue.FindIndex(t => t.Id == current.Id);
+            if (_currentIndex < 0) _currentIndex = 0;
+        }
+        QueueChanged?.Invoke();
+    }
+
     // ── Navigation ───────────────────────────────────────────
 
     public TrackInfo? PlayIndex(int index)

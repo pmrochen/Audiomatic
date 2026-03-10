@@ -6,8 +6,12 @@
     Title="Audiomatic">
 
     <Grid x:Name="RootGrid" KeyDown="RootGrid_KeyDown"
-          RightTapped="RootGrid_RightTapped">
+          RightTapped="RootGrid_RightTapped"
+          AllowDrop="True"
+          DragOver="RootGrid_DragOver"
+          Drop="RootGrid_Drop">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -173,8 +177,58 @@
                     VerticalAlignment="Center"/>
         </Grid>
 
-        <!-- Row 5: Search + Sort -->
-        <Grid x:Name="SearchSortRow" Grid.Row="5" Padding="14,0,14,6">
+        <!-- Row 5: View navigation -->
+        <Grid x:Name="NavRow" Grid.Row="5" Padding="14,0,14,4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Tab buttons (Library / Playlists) -->
+            <StackPanel x:Name="NavTabs" Grid.Column="0" Orientation="Horizontal" Spacing="2">
+                <Button x:Name="NavLibraryBtn" Background="Transparent" BorderThickness="0"
+                        Padding="8,4" Click="NavLibrary_Click">
+                    <TextBlock x:Name="NavLibraryText" Text="Library" FontSize="12" FontWeight="SemiBold"/>
+                </Button>
+                <Button x:Name="NavPlaylistsBtn" Background="Transparent" BorderThickness="0"
+                        Padding="8,4" Click="NavPlaylists_Click">
+                    <TextBlock x:Name="NavPlaylistsText" Text="Playlists" FontSize="12"/>
+                </Button>
+                <Button x:Name="NavQueueBtn" Background="Transparent" BorderThickness="0"
+                        Padding="8,4" Click="NavQueue_Click">
+                    <TextBlock x:Name="NavQueueText" Text="Queue" FontSize="12"/>
+                </Button>
+            </StackPanel>
+
+            <!-- Playlist detail header (back + name) -->
+            <StackPanel x:Name="PlaylistHeader" Grid.Column="0" Orientation="Horizontal"
+                        Spacing="4" Visibility="Collapsed">
+                <Button Background="Transparent" BorderThickness="0" Padding="4,4"
+                        Click="NavBack_Click" ToolTipService.ToolTip="Back to playlists">
+                    <FontIcon Glyph="&#xE72B;" FontSize="12"/>
+                </Button>
+                <TextBlock x:Name="PlaylistNameText" VerticalAlignment="Center"
+                           FontSize="12" FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" MaxLines="1"/>
+            </StackPanel>
+
+            <!-- New playlist button -->
+            <Button x:Name="NewPlaylistBtn" Grid.Column="1" Background="Transparent"
+                    BorderThickness="0" Padding="6,4" Click="NewPlaylist_Click"
+                    Visibility="Collapsed" ToolTipService.ToolTip="New Playlist">
+                <FontIcon Glyph="&#xE710;" FontSize="12"/>
+            </Button>
+
+            <!-- Clear queue button -->
+            <Button x:Name="ClearQueueBtn" Grid.Column="1" Background="Transparent"
+                    BorderThickness="0" Padding="6,4" Click="ClearQueue_Click"
+                    Visibility="Collapsed" ToolTipService.ToolTip="Clear Queue">
+                <FontIcon Glyph="&#xE74D;" FontSize="12"/>
+            </Button>
+        </Grid>
+
+        <!-- Row 6: Search + Sort -->
+        <Grid x:Name="SearchSortRow" Grid.Row="6" Padding="14,0,14,6">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
@@ -209,12 +263,13 @@
             </DropDownButton>
         </Grid>
 
-        <!-- Row 6: Track list -->
-        <ListView x:Name="TrackListView" Grid.Row="6"
+        <!-- Row 7: Track list -->
+        <ListView x:Name="TrackListView" Grid.Row="7"
                   Padding="6,0"
                   SelectionMode="Single"
                   IsItemClickEnabled="True"
-                  ItemClick="TrackList_ItemClick">
+                  ItemClick="TrackList_ItemClick"
+                  DragItemsCompleted="TrackListView_DragItemsCompleted">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -224,8 +279,8 @@
             </ListView.ItemContainerStyle>
         </ListView>
 
-        <!-- Row 7: Bottom bar -->
-        <Grid x:Name="BottomBar" Grid.Row="7" Padding="10,6,10,8">
+        <!-- Row 8: Bottom bar -->
+        <Grid x:Name="BottomBar" Grid.Row="8" Padding="10,6,10,8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
