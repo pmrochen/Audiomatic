@@ -94,6 +94,55 @@
             </StackPanel>
         </Grid>
 
+        <!-- Row 1b: Mini-player layout (visible only in mini mode) -->
+        <Grid x:Name="MiniPlayerBar" Grid.Row="1" Padding="10,6,10,6"
+              Background="Transparent" Visibility="Collapsed"
+              PointerPressed="DragArea_PointerPressed"
+              PointerMoved="DragArea_PointerMoved"
+              PointerReleased="DragArea_PointerReleased">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Mini album art -->
+            <Grid Grid.Column="0" Width="40" Height="40" CornerRadius="4"
+                  Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
+                <Image x:Name="MiniAlbumArt" Stretch="UniformToFill"
+                       Width="40" Height="40"/>
+                <FontIcon x:Name="MiniAlbumArtPlaceholder" Glyph="&#xE8D6;" FontSize="18"
+                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                          Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+            </Grid>
+
+            <!-- Title - Artist on one line -->
+            <TextBlock x:Name="MiniTrackText" Grid.Column="1"
+                       Text="No track" FontSize="12"
+                       VerticalAlignment="Center" Margin="10,0,0,0"
+                       TextTrimming="CharacterEllipsis" MaxLines="1"/>
+
+            <!-- Play/Pause button -->
+            <Button x:Name="MiniPlayPauseButton" Grid.Column="2"
+                    Width="32" Height="32" CornerRadius="16"
+                    Padding="0" Margin="6,0"
+                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                    Foreground="White"
+                    HorizontalContentAlignment="Center"
+                    VerticalContentAlignment="Center"
+                    Click="PlayPause_Click">
+                <FontIcon x:Name="MiniPlayPauseIcon" Glyph="&#xE768;" FontSize="14"
+                          Foreground="White"/>
+            </Button>
+
+            <!-- Close button -->
+            <Button Grid.Column="3" Background="Transparent" BorderThickness="0"
+                    Padding="4,4" Click="Close_Click">
+                <FontIcon Glyph="&#xE711;" FontSize="10"/>
+            </Button>
+        </Grid>
+
         <!-- Row 2: Timeline (progress bar + times) -->
         <Grid Grid.Row="2" Padding="14,0,14,0">
             <Grid.RowDefinitions>

@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
@@ -38,10 +39,15 @@ public sealed partial class MainWindow : Window
     private DispatcherTimer? _spectrumTimer;
     private int _vizFps = 30;
 
+    // View transition animation
+    private bool _isViewTransitioning;
+
     // Collapse animation
-    private bool _isCollapsed;
+    private enum CollapseState { Expanded, Compact, Mini }
+    private CollapseState _collapseState = CollapseState.Expanded;
     private readonly int _expandedHeight = 710;
     private readonly int _collapsedHeight = 220;
+    private readonly int _miniHeight = 60;
     private DispatcherTimer? _animTimer;
     private int _targetHeight;
     private int _currentAnimHeight;
@@ -493,6 +499,7 @@ public sealed partial class MainWindow : Window
         else
         {
             PlayPauseIcon.Glyph = "\uE768";
+            MiniPlayPauseIcon.Glyph = "\uE768";
         }
     }
 
@@ -518,7 +525,9 @@ public sealed partial class MainWindow : Window
         TrackArtist.Text = track.Artist;
         TrackAlbum.Text = track.Album;
         PlayPauseIcon.Glyph = "\uE769"; // Pause icon
+        MiniPlayPauseIcon.Glyph = "\uE769";
         LoadAlbumArt(track.Path);
+        UpdateMiniPlayer(track);
         // Re-highlight current track in the appropriate view
         if (_viewMode == ViewMode.Visualizer)
             PrepareSpectrumForCurrentTrack();
@@ -526,6 +535,29 @@ public sealed partial class MainWindow : Window
             BuildQueueView();
         else if (_viewMode != ViewMode.PlaylistList)
             RebuildTrackList();
+    }
+
+    private void UpdateMiniPlayer(TrackInfo? track)
+    {
+        if (track == null)
+        {
+            MiniTrackText.Text = "No track";
+            MiniAlbumArt.Source = null;
+            MiniAlbumArt.Visibility = Visibility.Collapsed;
+            MiniAlbumArtPlaceholder.Visibility = Visibility.Visible;
+            return;
+        }
+
+        var display = string.IsNullOrEmpty(track.Artist)
+            ? track.Title
+            : $"{track.Title} \u2014 {track.Artist}";
+        MiniTrackText.Text = display;
+
+        // Share album art from main display
+        MiniAlbumArt.Source = AlbumArtImage.Source;
+        var hasArt = AlbumArtImage.Source != null;
+        MiniAlbumArt.Visibility = hasArt ? Visibility.Visible : Visibility.Collapsed;
+        MiniAlbumArtPlaceholder.Visibility = hasArt ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private static readonly string[] CoverFileNames = { "cover", "folder", "album", "front", "artwork" };
@@ -621,6 +653,7 @@ public sealed partial class MainWindow : Window
 
         _player.TogglePlayPause();
         PlayPauseIcon.Glyph = _player.IsPlaying ? "\uE769" : "\uE768";
+        MiniPlayPauseIcon.Glyph = PlayPauseIcon.Glyph;
     }
 
     private async void Prev_Click(object sender, RoutedEventArgs e)
@@ -808,20 +841,22 @@ public sealed partial class MainWindow : Window
 
     private void NavLibrary_Click(object sender, RoutedEventArgs e)
     {
+        if (_viewMode == ViewMode.Library) return;
         _viewMode = ViewMode.Library;
         _currentPlaylist = null;
         UpdateNavigation();
         UpdateSpectrumTimer();
-        ApplyFilterAndSort();
+        AnimateViewTransition(() => ApplyFilterAndSort());
     }
 
     private void NavPlaylists_Click(object sender, RoutedEventArgs e)
     {
+        if (_viewMode == ViewMode.PlaylistList) return;
         _viewMode = ViewMode.PlaylistList;
         _currentPlaylist = null;
         UpdateNavigation();
         UpdateSpectrumTimer();
-        LoadPlaylistList();
+        AnimateViewTransition(() => LoadPlaylistList());
     }
 
     private void NavBack_Click(object sender, RoutedEventArgs e)
@@ -890,6 +925,97 @@ public sealed partial class MainWindow : Window
         // Playlist detail name
         if (_currentPlaylist != null)
             PlaylistNameText.Text = _currentPlaylist.Name;
+    }
+
+    private void AnimateViewTransition(Action buildNewContent, bool slideFromRight = true)
+    {
+        if (_isViewTransitioning) return;
+        _isViewTransitioning = true;
+
+        // Target the visible content container
+        FrameworkElement target = _viewMode == ViewMode.Visualizer
+            ? WaveformContainer
+            : TrackListView;
+
+        if (target.RenderTransform is not TranslateTransform)
+            target.RenderTransform = new TranslateTransform();
+
+        var transform = (TranslateTransform)target.RenderTransform;
+        double direction = slideFromRight ? -1 : 1;
+
+        // Phase 1: Exit — slide out + fade
+        var exitX = new DoubleAnimation
+        {
+            From = 0,
+            To = 30 * direction,
+            Duration = new Duration(TimeSpan.FromMilliseconds(120)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        Storyboard.SetTarget(exitX, transform);
+        Storyboard.SetTargetProperty(exitX, "X");
+
+        var exitOpacity = new DoubleAnimation
+        {
+            From = 1,
+            To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(120)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        Storyboard.SetTarget(exitOpacity, target);
+        Storyboard.SetTargetProperty(exitOpacity, "Opacity");
+
+        var exitStoryboard = new Storyboard();
+        exitStoryboard.Children.Add(exitX);
+        exitStoryboard.Children.Add(exitOpacity);
+
+        exitStoryboard.Completed += (_, _) =>
+        {
+            buildNewContent();
+
+            // Re-target if container changed (e.g. Library→Visualizer)
+            FrameworkElement newTarget = _viewMode == ViewMode.Visualizer
+                ? WaveformContainer
+                : TrackListView;
+
+            if (newTarget.RenderTransform is not TranslateTransform)
+                newTarget.RenderTransform = new TranslateTransform();
+
+            var newTransform = (TranslateTransform)newTarget.RenderTransform;
+
+            // Phase 2: Enter — slide in + fade
+            var enterX = new DoubleAnimation
+            {
+                From = -30 * direction,
+                To = 0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(150)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(enterX, newTransform);
+            Storyboard.SetTargetProperty(enterX, "X");
+
+            var enterOpacity = new DoubleAnimation
+            {
+                From = 0,
+                To = 1,
+                Duration = new Duration(TimeSpan.FromMilliseconds(150)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(enterOpacity, newTarget);
+            Storyboard.SetTargetProperty(enterOpacity, "Opacity");
+
+            var enterStoryboard = new Storyboard();
+            enterStoryboard.Children.Add(enterX);
+            enterStoryboard.Children.Add(enterOpacity);
+
+            enterStoryboard.Completed += (_, _) =>
+            {
+                _isViewTransitioning = false;
+            };
+
+            enterStoryboard.Begin();
+        };
+
+        exitStoryboard.Begin();
     }
 
     private void LoadPlaylistList()
@@ -1140,11 +1266,12 @@ public sealed partial class MainWindow : Window
 
     private void NavQueue_Click(object sender, RoutedEventArgs e)
     {
+        if (_viewMode == ViewMode.Queue) return;
         _viewMode = ViewMode.Queue;
         _currentPlaylist = null;
         UpdateNavigation();
         UpdateSpectrumTimer();
-        BuildQueueView();
+        AnimateViewTransition(() => BuildQueueView());
     }
 
     private void ClearQueue_Click(object sender, RoutedEventArgs e)
@@ -1157,10 +1284,12 @@ public sealed partial class MainWindow : Window
 
     private void NavVisualizer_Click(object sender, RoutedEventArgs e)
     {
+        if (_viewMode == ViewMode.Visualizer) return;
         _viewMode = ViewMode.Visualizer;
         _currentPlaylist = null;
         UpdateNavigation();
         UpdateSpectrumTimer();
+        AnimateViewTransition(() => { /* visualizer draws via timer */ });
     }
 
     private void UpdateSpectrumTimer()
@@ -1655,7 +1784,8 @@ public sealed partial class MainWindow : Window
 
         // Toggle actions
         panel.Children.Add(ActionPanel.CreateButton("\uE73F",
-            _isCollapsed ? "Expand" : "Compact Mode",
+            _collapseState == CollapseState.Expanded ? "Compact Mode" :
+            _collapseState == CollapseState.Compact ? "Mini Player" : "Expand",
             ["Ctrl", "L"], () =>
         {
             flyout.Hide();
@@ -1740,22 +1870,50 @@ public sealed partial class MainWindow : Window
 
     private void ToggleCollapse()
     {
-        _isCollapsed = !_isCollapsed;
-        _targetHeight = _isCollapsed ? _collapsedHeight : _expandedHeight;
+        // Cycle: Expanded → Compact → Mini → Expanded
+        _collapseState = _collapseState switch
+        {
+            CollapseState.Expanded => CollapseState.Compact,
+            CollapseState.Compact => CollapseState.Mini,
+            CollapseState.Mini => CollapseState.Expanded,
+            _ => CollapseState.Expanded
+        };
+
+        _targetHeight = _collapseState switch
+        {
+            CollapseState.Mini => _miniHeight,
+            CollapseState.Compact => _collapsedHeight,
+            _ => _expandedHeight
+        };
+
         _currentAnimHeight = AppWindow.Size.Height;
 
-        // Keep bottom edge fixed: adjust Y so top moves instead
+        // Keep bottom edge fixed
         _animStartY = AppWindow.Position.Y;
         var bottomEdge = _animStartY + AppWindow.Size.Height;
         _targetY = bottomEdge - _targetHeight;
 
-        // Update collapse/expand icon
-        CollapseIcon.Glyph = _isCollapsed ? "\uE740" : "\uE73F";
-        ToolTipService.SetToolTip(CollapseButton, _isCollapsed ? "Expand (Ctrl+L)" : "Compact (Ctrl+L)");
+        // Update icon and tooltip
+        CollapseIcon.Glyph = _collapseState switch
+        {
+            CollapseState.Expanded => "\uE73F",
+            CollapseState.Compact => "\uE73F",
+            CollapseState.Mini => "\uE740",
+            _ => "\uE73F"
+        };
+        ToolTipService.SetToolTip(CollapseButton, _collapseState switch
+        {
+            CollapseState.Expanded => "Compact (Ctrl+L)",
+            CollapseState.Compact => "Mini (Ctrl+L)",
+            CollapseState.Mini => "Expand (Ctrl+L)",
+            _ => "Compact (Ctrl+L)"
+        });
 
         // Show elements before expanding animation
-        if (!_isCollapsed)
+        if (_collapseState == CollapseState.Expanded)
         {
+            NowPlayingCard.Visibility = Visibility.Visible;
+            MiniPlayerBar.Visibility = Visibility.Collapsed;
             VolumeRow.Visibility = Visibility.Visible;
             NavRow.Visibility = Visibility.Visible;
             SearchSortRow.Visibility = (_viewMode == ViewMode.Library || _viewMode == ViewMode.PlaylistDetail)
@@ -1765,6 +1923,18 @@ public sealed partial class MainWindow : Window
             WaveformContainer.Visibility = _viewMode == ViewMode.Visualizer
                 ? Visibility.Visible : Visibility.Collapsed;
             BottomBar.Visibility = Visibility.Visible;
+            CustomTitleBar.Visibility = Visibility.Visible;
+        }
+        else if (_collapseState == CollapseState.Compact)
+        {
+            NowPlayingCard.Visibility = Visibility.Visible;
+            MiniPlayerBar.Visibility = Visibility.Collapsed;
+            CustomTitleBar.Visibility = Visibility.Visible;
+        }
+        else if (_collapseState == CollapseState.Mini)
+        {
+            UpdateMiniPlayer(_queue.CurrentTrack);
+            MiniPlayPauseIcon.Glyph = _player.IsPlaying ? "\uE769" : "\uE768";
         }
 
         _animTimer?.Stop();
@@ -1783,27 +1953,38 @@ public sealed partial class MainWindow : Window
             _animTimer?.Stop();
             _animTimer = null;
 
-            // Hide elements after collapsing animation
-            if (_isCollapsed)
+            // Set final visibility based on collapse state
+            if (_collapseState == CollapseState.Compact)
             {
                 VolumeRow.Visibility = Visibility.Collapsed;
                 NavRow.Visibility = Visibility.Collapsed;
                 SearchSortRow.Visibility = Visibility.Collapsed;
                 TrackListView.Visibility = Visibility.Collapsed;
+                WaveformContainer.Visibility = Visibility.Collapsed;
                 BottomBar.Visibility = Visibility.Collapsed;
+                MiniPlayerBar.Visibility = Visibility.Collapsed;
+                NowPlayingCard.Visibility = Visibility.Visible;
+            }
+            else if (_collapseState == CollapseState.Mini)
+            {
+                CustomTitleBar.Visibility = Visibility.Collapsed;
+                NowPlayingCard.Visibility = Visibility.Collapsed;
+                VolumeRow.Visibility = Visibility.Collapsed;
+                NavRow.Visibility = Visibility.Collapsed;
+                SearchSortRow.Visibility = Visibility.Collapsed;
+                TrackListView.Visibility = Visibility.Collapsed;
+                WaveformContainer.Visibility = Visibility.Collapsed;
+                BottomBar.Visibility = Visibility.Collapsed;
+                MiniPlayerBar.Visibility = Visibility.Visible;
             }
 
-            // Snap to final position
             AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(
                 AppWindow.Position.X, _targetY,
                 AppWindow.Size.Width, _currentAnimHeight));
         }
         else
         {
-            // Ease-out: move a fraction of remaining distance each frame
             _currentAnimHeight += (int)(diff * 0.18);
-
-            // Move Y so bottom edge stays fixed
             var newY = _targetY + (_targetHeight - _currentAnimHeight);
             AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(
                 AppWindow.Position.X, newY,
