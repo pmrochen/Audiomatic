@@ -249,7 +249,24 @@ public sealed class AudioPlayerService : IDisposable
         else Play();
     }
 
-    private void UpdateSmtc(TrackInfo track)
+    private static readonly string[] CoverFileNames = { "cover", "folder", "album", "front", "artwork" };
+    private static readonly string[] CoverExtensions = { ".jpg", ".jpeg", ".png", ".bmp", ".webp" };
+
+    private static string? FindCoverFile(string folder)
+    {
+        foreach (var name in CoverFileNames)
+        {
+            foreach (var ext in CoverExtensions)
+            {
+                var path = System.IO.Path.Combine(folder, name + ext);
+                if (System.IO.File.Exists(path))
+                    return path;
+            }
+        }
+        return null;
+    }
+
+    private async void UpdateSmtc(TrackInfo track)
     {
         try
         {
@@ -267,9 +284,10 @@ public sealed class AudioPlayerService : IDisposable
             updater.MusicProperties.Artist = track.Artist;
             updater.MusicProperties.AlbumTitle = track.Album;
 
-            // Try to set album art from embedded tag
+            // Try to set album art from embedded tag, then from folder cover file
             try
             {
+                bool found = false;
                 using var tagFile = TagLib.File.Create(track.Path);
                 if (tagFile.Tag.Pictures.Length > 0)
                 {
@@ -282,6 +300,21 @@ public sealed class AudioPlayerService : IDisposable
 
                     _albumArtStream?.Dispose();
                     _albumArtStream = newStream;
+                    found = true;
+                }
+
+                if (!found)
+                {
+                    var folder = System.IO.Path.GetDirectoryName(track.Path);
+                    if (folder != null)
+                    {
+                        var coverPath = FindCoverFile(folder);
+                        if (coverPath != null)
+                        {
+                            var file = await StorageFile.GetFileFromPathAsync(coverPath);
+                            updater.Thumbnail = RandomAccessStreamReference.CreateFromFile(file);
+                        }
+                    }
                 }
             }
             catch { }

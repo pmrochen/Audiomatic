@@ -512,8 +512,12 @@ public sealed partial class MainWindow : Window
             RebuildTrackList();
     }
 
+    private static readonly string[] CoverFileNames = { "cover", "folder", "album", "front", "artwork" };
+    private static readonly string[] CoverExtensions = { ".jpg", ".jpeg", ".png", ".bmp", ".webp" };
+
     private async void LoadAlbumArt(string filePath)
     {
+        // 1. Try embedded tag artwork
         try
         {
             using var tagFile = TagLib.File.Create(filePath);
@@ -536,9 +540,43 @@ public sealed partial class MainWindow : Window
         }
         catch { }
 
+        // 2. Try cover image file in the same folder
+        try
+        {
+            var folder = System.IO.Path.GetDirectoryName(filePath);
+            if (folder != null)
+            {
+                var coverPath = FindCoverFile(folder);
+                if (coverPath != null)
+                {
+                    var bitmap = new BitmapImage();
+                    bitmap.UriSource = new Uri(coverPath);
+                    AlbumArtImage.Source = bitmap;
+                    AlbumArtPlaceholder.Visibility = Visibility.Collapsed;
+                    AlbumArtImage.Visibility = Visibility.Visible;
+                    return;
+                }
+            }
+        }
+        catch { }
+
         AlbumArtImage.Source = null;
         AlbumArtImage.Visibility = Visibility.Collapsed;
         AlbumArtPlaceholder.Visibility = Visibility.Visible;
+    }
+
+    private static string? FindCoverFile(string folder)
+    {
+        foreach (var name in CoverFileNames)
+        {
+            foreach (var ext in CoverExtensions)
+            {
+                var path = System.IO.Path.Combine(folder, name + ext);
+                if (System.IO.File.Exists(path))
+                    return path;
+            }
+        }
+        return null;
     }
 
     // -- Controls -------------------------------------------------
