@@ -6,7 +6,7 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 ![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)
 ![WinUI 3](https://img.shields.io/badge/WinUI-3-blue)
 
-![Audiomatic1](https://res.cloudinary.com/dptrimoqv/image/upload/v1773226483/873shots_so_u3ecyr.png)
+![Audiomatic](https://res.cloudinary.com/dptrimoqv/image/upload/v1773230722/158shots_so_jvlq5x.png)
 
 ## Features
 
@@ -44,6 +44,8 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 - Real-time filtering by title, artist, or album
 - Sort by Title, Artist, Album, or Duration
 - Ascending/Descending toggle
+
+![Audiomatic1](https://res.cloudinary.com/dptrimoqv/image/upload/v1773226483/873shots_so_u3ecyr.png)
 
 ### Favorites
 
