@@ -5,9 +5,8 @@ namespace Audiomatic.Services;
 
 public sealed class SpectrumAnalyzer : IDisposable
 {
-    private AudioFileReader? _reader;
+    private float[]? _decoded;
     private int _sampleRate;
-    private int _channels;
     private string? _currentPath;
     private float[] _smoothed = [];
     private volatile bool _decoding;
@@ -23,94 +22,49 @@ public sealed class SpectrumAnalyzer : IDisposable
     private readonly float[] _mags = new float[FftSize / 2];
     private float[] _bands = [];
 
-    // Sliding window cache — ~10 s of mono samples kept in memory
-    // avoids per-frame disk seeks on compressed formats
-    private const int CacheSeconds = 10;
-    private float[]? _cache;
-    private long _cacheStartSample; // first mono sample index in cache
-    private int _cacheSampleCount;  // valid mono samples in cache
-
     /// <summary>
-    /// Opens an AudioFileReader for on-demand decoding.
-    /// Only a sliding window (~10 s) is kept in memory.
+    /// Pre-decodes the audio file to a mono float array in memory.
+    /// Fast random access afterward — no file seeking needed.
     /// </summary>
     public async Task PrepareAsync(string filePath)
     {
-        if (filePath == _currentPath && _reader != null) return;
+        if (filePath == _currentPath && _decoded != null) return;
         _currentPath = filePath;
-        _reader?.Dispose();
-        _reader = null;
-        _cache = null;
-        _cacheSampleCount = 0;
+        _decoded = null;
         _decoding = true;
 
-        var reader = await Task.Run(() => new AudioFileReader(filePath));
+        var (samples, rate) = await Task.Run(() =>
+        {
+            using var reader = new AudioFileReader(filePath);
+            int sr = reader.WaveFormat.SampleRate;
+            int channels = reader.WaveFormat.Channels;
+
+            // Estimate total mono samples for pre-allocation
+            long estimatedMono = reader.Length / (reader.WaveFormat.BitsPerSample / 8) / channels;
+            var mono = new List<float>((int)Math.Min(estimatedMono, int.MaxValue));
+
+            var buf = new float[8192];
+            int read;
+            while ((read = reader.Read(buf, 0, buf.Length)) > 0)
+            {
+                for (int i = 0; i < read; i += channels)
+                {
+                    float s = 0;
+                    for (int c = 0; c < channels && i + c < read; c++)
+                        s += buf[i + c];
+                    mono.Add(s / channels);
+                }
+            }
+            return (mono.ToArray(), sr);
+        });
 
         // Only apply if still the same track
         if (_currentPath == filePath)
         {
-            _reader = reader;
-            _sampleRate = reader.WaveFormat.SampleRate;
-            _channels = reader.WaveFormat.Channels;
-            _cache = new float[_sampleRate * CacheSeconds];
-            _cacheStartSample = -1;
-            _cacheSampleCount = 0;
-        }
-        else
-        {
-            reader.Dispose();
+            _decoded = samples;
+            _sampleRate = rate;
         }
         _decoding = false;
-    }
-
-    /// <summary>
-    /// Fills the sliding cache so it covers [sampleOffset .. sampleOffset + FftSize).
-    /// Only reads from disk when the requested window falls outside the cache.
-    /// </summary>
-    private bool EnsureCached(long sampleOffset)
-    {
-        if (_reader == null || _cache == null) return false;
-
-        long cacheEnd = _cacheStartSample + _cacheSampleCount;
-        bool hit = _cacheStartSample >= 0
-                   && sampleOffset >= _cacheStartSample
-                   && sampleOffset + FftSize <= cacheEnd;
-        if (hit) return true;
-
-        // Cache miss — read a full window centered on sampleOffset
-        long totalMonoSamples = _reader.Length / (_channels * sizeof(float));
-        long start = Math.Max(0, sampleOffset - _sampleRate); // 1 s before
-        long end = Math.Min(totalMonoSamples, start + _cache.Length);
-        if (end - start < FftSize) return false;
-
-        long bytePos = start * _channels * sizeof(float);
-        try
-        {
-            _reader.Position = bytePos;
-        }
-        catch { return false; }
-
-        int monoToRead = (int)(end - start);
-        int interleavedToRead = monoToRead * _channels;
-
-        // Temporary interleaved read buffer (stack-friendly size check)
-        var interleaved = new float[interleavedToRead];
-        int read = _reader.Read(interleaved, 0, interleavedToRead);
-        int monoRead = read / _channels;
-
-        // Down-mix to mono into cache
-        for (int i = 0; i < monoRead; i++)
-        {
-            float s = 0;
-            int b = i * _channels;
-            for (int c = 0; c < _channels; c++)
-                s += interleaved[b + c];
-            _cache[i] = s / _channels;
-        }
-
-        _cacheStartSample = start;
-        _cacheSampleCount = monoRead;
-        return sampleOffset >= start && sampleOffset + FftSize <= start + monoRead;
     }
 
     /// <summary>
@@ -118,23 +72,19 @@ public sealed class SpectrumAnalyzer : IDisposable
     /// </summary>
     public float[] GetSpectrum(TimeSpan position, int bandCount)
     {
-        if (_reader == null || _sampleRate == 0 || _cache == null)
+        if (_decoded == null || _sampleRate == 0)
             return Decay(bandCount);
 
-        long sampleOffset = (long)(position.TotalSeconds * _sampleRate);
-        if (sampleOffset < 0) sampleOffset = 0;
-
-        if (!EnsureCached(sampleOffset))
+        int start = (int)(position.TotalSeconds * _sampleRate);
+        if (start < 0) start = 0;
+        if (start + FftSize > _decoded.Length)
             return Decay(bandCount);
 
-        // Index into cache
-        int cacheIdx = (int)(sampleOffset - _cacheStartSample);
-
-        // Hamming window + FFT (reusable buffer)
+        // Hamming window + FFT — reusable buffers
         for (int i = 0; i < FftSize; i++)
         {
             float window = 0.54f - 0.46f * MathF.Cos(2f * MathF.PI * i / (FftSize - 1));
-            _fftBuffer[i].X = _cache[cacheIdx + i] * window;
+            _fftBuffer[i].X = _decoded[start + i] * window;
             _fftBuffer[i].Y = 0;
         }
         FastFourierTransform.FFT(true, FftLog2, _fftBuffer);
@@ -181,7 +131,7 @@ public sealed class SpectrumAnalyzer : IDisposable
         return _smoothed;
     }
 
-    public bool IsReady => _reader != null;
+    public bool IsReady => _decoded != null;
     public bool IsDecoding => _decoding;
 
     private float[] Decay(int bandCount)
@@ -195,19 +145,14 @@ public sealed class SpectrumAnalyzer : IDisposable
 
     public void Reset()
     {
-        _reader?.Dispose();
-        _reader = null;
+        _decoded = null;
         _currentPath = null;
-        _cache = null;
-        _cacheSampleCount = 0;
         _smoothed = [];
     }
 
     public void Dispose()
     {
-        _reader?.Dispose();
-        _reader = null;
+        _decoded = null;
         _currentPath = null;
-        _cache = null;
     }
 }
