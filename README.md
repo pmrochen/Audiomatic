@@ -6,6 +6,8 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 ![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)
 ![WinUI 3](https://img.shields.io/badge/WinUI-3-blue)
 
+![Audiomatic1](https://res.cloudinary.com/dptrimoqv/image/upload/v1773226483/873shots_so_u3ecyr.png)
+
 ## Features
 
 ### Audio Playback
@@ -86,6 +88,8 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 - Compact mode and pin-on-top toggles
 - All preferences persisted in `settings.json`
 
+![Audiomatic2](https://res.cloudinary.com/dptrimoqv/image/upload/v1773226483/52shots_so_elqw2c.png)
+
 ## Tech Stack
 
 | Component | Technology |
@@ -110,6 +114,8 @@ All application data is stored in `%LOCALAPPDATA%\Audiomatic\`:
 ```bash
 dotnet build Audiomatic.sln -c Release
 ```
+
+![Audiomatic3](https://res.cloudinary.com/dptrimoqv/image/upload/v1773226483/475shots_so_evix22.png)
 
 ## License
 
