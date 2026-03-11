@@ -40,6 +40,8 @@ public sealed partial class MainWindow : Window
     private DispatcherTimer? _animTimer;
     private int _targetHeight;
     private int _currentAnimHeight;
+    private int _animStartY;
+    private int _targetY;
 
     // Window drag
     private bool _isDragging;
@@ -1546,6 +1548,11 @@ public sealed partial class MainWindow : Window
         _targetHeight = _isCollapsed ? _collapsedHeight : _expandedHeight;
         _currentAnimHeight = AppWindow.Size.Height;
 
+        // Keep bottom edge fixed: adjust Y so top moves instead
+        _animStartY = AppWindow.Position.Y;
+        var bottomEdge = _animStartY + AppWindow.Size.Height;
+        _targetY = bottomEdge - _targetHeight;
+
         // Update collapse/expand icon
         CollapseIcon.Glyph = _isCollapsed ? "\uE740" : "\uE73F";
         ToolTipService.SetToolTip(CollapseButton, _isCollapsed ? "Expand (Ctrl+L)" : "Compact (Ctrl+L)");
@@ -1586,14 +1593,23 @@ public sealed partial class MainWindow : Window
                 TrackListView.Visibility = Visibility.Collapsed;
                 BottomBar.Visibility = Visibility.Collapsed;
             }
+
+            // Snap to final position
+            AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(
+                AppWindow.Position.X, _targetY,
+                AppWindow.Size.Width, _currentAnimHeight));
         }
         else
         {
             // Ease-out: move a fraction of remaining distance each frame
             _currentAnimHeight += (int)(diff * 0.18);
-        }
 
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(AppWindow.Size.Width, _currentAnimHeight));
+            // Move Y so bottom edge stays fixed
+            var newY = _targetY + (_targetHeight - _currentAnimHeight);
+            AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(
+                AppWindow.Position.X, newY,
+                AppWindow.Size.Width, _currentAnimHeight));
+        }
     }
 
     // -- Window chrome --------------------------------------------
