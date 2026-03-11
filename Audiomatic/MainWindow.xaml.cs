@@ -2350,8 +2350,31 @@ public sealed partial class MainWindow : Window
 
     private void RootGrid_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
-        ShowSettingsFlyout(sender as FrameworkElement ?? RootGrid);
+        if (_collapseState == CollapseState.Mini)
+        {
+            ShowMiniContextMenu(sender as FrameworkElement ?? RootGrid);
+        }
+        else
+        {
+            ShowSettingsFlyout(sender as FrameworkElement ?? RootGrid);
+        }
         e.Handled = true;
+    }
+
+    private void ShowMiniContextMenu(FrameworkElement anchor)
+    {
+        var flyout = new Flyout();
+        flyout.FlyoutPresenterStyle = ActionPanel.CreateFlyoutPresenterStyle(minWidth: 140, maxWidth: 180);
+
+        var panel = new StackPanel { Spacing = 0 };
+        panel.Children.Add(ActionPanel.CreateButton("\uE740", "Expand", ["Ctrl", "L"], () =>
+        {
+            flyout.Hide();
+            ToggleCollapse();
+        }));
+
+        flyout.Content = panel;
+        flyout.ShowAt(anchor);
     }
 
     private void Pin_Click(object sender, RoutedEventArgs e)
