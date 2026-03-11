@@ -12,6 +12,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Media.Control;
 using Windows.Storage;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
@@ -30,7 +31,7 @@ public sealed partial class MainWindow : Window
     private bool _sortAscending = true;
 
     // Playlist navigation
-    private enum ViewMode { Library, PlaylistList, PlaylistDetail, Queue, Visualizer }
+    private enum ViewMode { Library, PlaylistList, PlaylistDetail, Queue, Visualizer, MediaControl }
     private ViewMode _viewMode = ViewMode.Library;
     private PlaylistInfo? _currentPlaylist;
 
@@ -43,6 +44,11 @@ public sealed partial class MainWindow : Window
 
     // View transition animation
     private bool _isViewTransitioning;
+
+    // Media control
+    private Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager? _mediaSessionManager;
+    private readonly Dictionary<string, MediaSessionPanel> _mediaSessionPanels = new();
+    private DispatcherTimer? _mediaTickTimer;
 
     // Collapse animation
     private enum CollapseState { Expanded, Compact, Mini }
@@ -231,6 +237,9 @@ public sealed partial class MainWindow : Window
                 WindowX = pos.X,
                 WindowY = pos.Y
             });
+            _mediaTickTimer?.Stop();
+            foreach (var p in _mediaSessionPanels.Values) p.Detach();
+            _mediaSessionPanels.Clear();
             _spectrumTimer?.Stop();
             _spectrum.Dispose();
             _player.Dispose();
@@ -862,6 +871,7 @@ public sealed partial class MainWindow : Window
         _currentPlaylist = null;
         UpdateNavigation();
         UpdateSpectrumTimer();
+        UpdateMediaTimer();
         AnimateViewTransition(() => ApplyFilterAndSort());
     }
 
@@ -872,6 +882,7 @@ public sealed partial class MainWindow : Window
         _currentPlaylist = null;
         UpdateNavigation();
         UpdateSpectrumTimer();
+        UpdateMediaTimer();
         AnimateViewTransition(() => LoadPlaylistList());
     }
 
@@ -927,15 +938,18 @@ public sealed partial class MainWindow : Window
         SetTab(NavPlaylistsText, _viewMode == ViewMode.PlaylistList);
         SetTab(NavQueueText, _viewMode == ViewMode.Queue);
         SetTab(NavVisualizerText, _viewMode == ViewMode.Visualizer);
+        SetTab(NavMediaText, _viewMode == ViewMode.MediaControl);
 
         // Show/hide search & sort
         SearchSortRow.Visibility = (_viewMode == ViewMode.Library || _viewMode == ViewMode.PlaylistDetail)
             ? Visibility.Visible : Visibility.Collapsed;
 
-        // Show/hide visualizer vs track list
+        // Show/hide content containers based on view mode
+        var isTrackView = _viewMode != ViewMode.Visualizer && _viewMode != ViewMode.MediaControl;
+        TrackListView.Visibility = isTrackView ? Visibility.Visible : Visibility.Collapsed;
         WaveformContainer.Visibility = _viewMode == ViewMode.Visualizer
             ? Visibility.Visible : Visibility.Collapsed;
-        TrackListView.Visibility = _viewMode != ViewMode.Visualizer
+        MediaContainer.Visibility = _viewMode == ViewMode.MediaControl
             ? Visibility.Visible : Visibility.Collapsed;
 
         // Playlist detail name
@@ -949,8 +963,8 @@ public sealed partial class MainWindow : Window
         _isViewTransitioning = true;
 
         // Target the visible content container
-        FrameworkElement target = _viewMode == ViewMode.Visualizer
-            ? WaveformContainer
+        FrameworkElement target = _viewMode == ViewMode.Visualizer ? WaveformContainer
+            : _viewMode == ViewMode.MediaControl ? MediaContainer
             : TrackListView;
 
         if (target.RenderTransform is not TranslateTransform)
@@ -989,8 +1003,8 @@ public sealed partial class MainWindow : Window
             buildNewContent();
 
             // Re-target if container changed (e.g. Library→Visualizer)
-            FrameworkElement newTarget = _viewMode == ViewMode.Visualizer
-                ? WaveformContainer
+            FrameworkElement newTarget = _viewMode == ViewMode.Visualizer ? WaveformContainer
+                : _viewMode == ViewMode.MediaControl ? MediaContainer
                 : TrackListView;
 
             if (newTarget.RenderTransform is not TranslateTransform)
@@ -1574,6 +1588,7 @@ public sealed partial class MainWindow : Window
         _currentPlaylist = null;
         UpdateNavigation();
         UpdateSpectrumTimer();
+        UpdateMediaTimer();
         AnimateViewTransition(() => BuildQueueView());
     }
 
@@ -1592,7 +1607,115 @@ public sealed partial class MainWindow : Window
         _currentPlaylist = null;
         UpdateNavigation();
         UpdateSpectrumTimer();
+        UpdateMediaTimer();
         AnimateViewTransition(() => { /* visualizer draws via timer */ });
+    }
+
+    private void NavMedia_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewMode == ViewMode.MediaControl) return;
+        _viewMode = ViewMode.MediaControl;
+        _currentPlaylist = null;
+        UpdateNavigation();
+        UpdateSpectrumTimer();
+        AnimateViewTransition(() => _ = InitMediaSessionsAsync());
+    }
+
+    // -- Media control ------------------------------------------------
+
+    private async Task InitMediaSessionsAsync()
+    {
+        if (_mediaSessionManager == null)
+        {
+            try
+            {
+                _mediaSessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+                _mediaSessionManager.SessionsChanged += (_, _) =>
+                    DispatcherQueue.TryEnqueue(RebuildMediaSessionList);
+            }
+            catch { return; }
+        }
+
+        RebuildMediaSessionList();
+        UpdateMediaTimer();
+    }
+
+    private void RebuildMediaSessionList()
+    {
+        if (_mediaSessionManager == null) return;
+
+        // Detach old panels
+        foreach (var panel in _mediaSessionPanels.Values)
+            panel.Detach();
+        _mediaSessionPanels.Clear();
+        MediaSessionList.Children.Clear();
+
+        var sessions = _mediaSessionManager.GetSessions();
+
+        if (sessions.Count == 0)
+        {
+            MediaSessionList.Children.Add(new StackPanel
+            {
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Spacing = 8,
+                Margin = new Thickness(0, 40, 0, 0),
+                Children =
+                {
+                    new FontIcon
+                    {
+                        Glyph = "\uE8D6", FontSize = 36,
+                        Foreground = ThemeHelper.Brush("TextFillColorTertiaryBrush"),
+                        HorizontalAlignment = HorizontalAlignment.Center
+                    },
+                    new TextBlock
+                    {
+                        Text = "No media playing",
+                        Foreground = ThemeHelper.Brush("TextFillColorSecondaryBrush"),
+                        HorizontalAlignment = HorizontalAlignment.Center
+                    },
+                    new TextBlock
+                    {
+                        Text = "Play music or a video to control it here",
+                        Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+                        Foreground = ThemeHelper.Brush("TextFillColorTertiaryBrush"),
+                        HorizontalAlignment = HorizontalAlignment.Center
+                    }
+                }
+            });
+        }
+        else
+        {
+            foreach (var session in sessions)
+            {
+                var id = session.SourceAppUserModelId;
+                var panel = new MediaSessionPanel(session, DispatcherQueue);
+                _mediaSessionPanels[id] = panel;
+                MediaSessionList.Children.Add(panel.RootElement);
+            }
+        }
+
+        TrackCountText.Text = $"{sessions.Count} session{(sessions.Count != 1 ? "s" : "")}";
+    }
+
+    private void UpdateMediaTimer()
+    {
+        bool needsTimer = _viewMode == ViewMode.MediaControl && _mediaSessionPanels.Count > 0;
+        if (needsTimer && _mediaTickTimer == null)
+        {
+            _mediaTickTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _mediaTickTimer.Tick += (_, _) =>
+            {
+                foreach (var panel in _mediaSessionPanels.Values)
+                    panel.UpdateTimeline();
+            };
+            _mediaTickTimer.Start();
+        }
+        else if (!needsTimer && _mediaTickTimer != null)
+        {
+            _mediaTickTimer.Stop();
+            _mediaTickTimer = null;
+        }
     }
 
     private void UpdateSpectrumTimer()
@@ -2249,9 +2372,11 @@ public sealed partial class MainWindow : Window
             NavRow.Visibility = Visibility.Visible;
             SearchSortRow.Visibility = (_viewMode == ViewMode.Library || _viewMode == ViewMode.PlaylistDetail)
                 ? Visibility.Visible : Visibility.Collapsed;
-            TrackListView.Visibility = _viewMode != ViewMode.Visualizer
+            TrackListView.Visibility = _viewMode != ViewMode.Visualizer && _viewMode != ViewMode.MediaControl
                 ? Visibility.Visible : Visibility.Collapsed;
             WaveformContainer.Visibility = _viewMode == ViewMode.Visualizer
+                ? Visibility.Visible : Visibility.Collapsed;
+            MediaContainer.Visibility = _viewMode == ViewMode.MediaControl
                 ? Visibility.Visible : Visibility.Collapsed;
             BottomBar.Visibility = Visibility.Visible;
             CustomTitleBar.Visibility = Visibility.Visible;
@@ -2272,6 +2397,7 @@ public sealed partial class MainWindow : Window
             SearchSortRow.Visibility = Visibility.Collapsed;
             TrackListView.Visibility = Visibility.Collapsed;
             WaveformContainer.Visibility = Visibility.Collapsed;
+            MediaContainer.Visibility = Visibility.Collapsed;
             BottomBar.Visibility = Visibility.Collapsed;
             MiniPlayerBar.Visibility = Visibility.Visible;
             UpdateMiniPlayer(_queue.CurrentTrack);
@@ -2302,6 +2428,7 @@ public sealed partial class MainWindow : Window
                 SearchSortRow.Visibility = Visibility.Collapsed;
                 TrackListView.Visibility = Visibility.Collapsed;
                 WaveformContainer.Visibility = Visibility.Collapsed;
+                MediaContainer.Visibility = Visibility.Collapsed;
                 BottomBar.Visibility = Visibility.Collapsed;
                 MiniPlayerBar.Visibility = Visibility.Collapsed;
                 NowPlayingCard.Visibility = Visibility.Visible;
@@ -2315,6 +2442,7 @@ public sealed partial class MainWindow : Window
                 SearchSortRow.Visibility = Visibility.Collapsed;
                 TrackListView.Visibility = Visibility.Collapsed;
                 WaveformContainer.Visibility = Visibility.Collapsed;
+                MediaContainer.Visibility = Visibility.Collapsed;
                 BottomBar.Visibility = Visibility.Collapsed;
                 MiniPlayerBar.Visibility = Visibility.Visible;
             }

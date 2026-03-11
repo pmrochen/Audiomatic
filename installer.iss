@@ -1,8 +1,8 @@
 [Setup]
 AppName=Audiomatic
-AppVersion=0.0.1
+AppVersion=0.0.2
 AppPublisher=OhMyCode
-DefaultDirName={autopf}\Audiomatic
+DefaultDirName={localappdata}\Programs\Audiomatic
 DefaultGroupName=Audiomatic
 OutputDir=.\Installer
 OutputBaseFilename=Audiomatic-Setup-x64
@@ -10,7 +10,7 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 UninstallDisplayIcon={app}\Audiomatic.exe
 WizardStyle=modern
 SetupIconFile=Audiomatic\app.ico
@@ -24,7 +24,7 @@ Name: "{autodesktop}\Audiomatic"; Filename: "{app}\Audiomatic.exe"; Tasks: deskt
 Name: "{userstartup}\Audiomatic"; Filename: "{app}\Audiomatic.exe"; Tasks: startupicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Raccourci sur le Bureau"; GroupDescription: "Raccourcis:"; Flags: unchecked
+Name: "desktopicon"; Description: "Raccourci sur le Bureau"; GroupDescription: "Raccourcis:"; Flags: checkedonce
 Name: "startupicon"; Description: "Lancer au démarrage de Windows"; GroupDescription: "Raccourcis:"; Flags: unchecked
 
 [Run]

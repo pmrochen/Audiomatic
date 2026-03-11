@@ -251,6 +251,10 @@
                         Padding="8,4" Click="NavVisualizer_Click">
                     <TextBlock x:Name="NavVisualizerText" Text="Visualizer" FontSize="12"/>
                 </Button>
+                <Button x:Name="NavMediaBtn" Background="Transparent" BorderThickness="0"
+                        Padding="8,4" Click="NavMedia_Click">
+                    <TextBlock x:Name="NavMediaText" Text="Media" FontSize="12"/>
+                </Button>
             </StackPanel>
 
             <!-- Playlist detail header (back + name) -->
@@ -340,6 +344,12 @@
               PointerPressed="WaveformCanvas_PointerPressed">
             <Canvas x:Name="WaveformCanvas"/>
         </Grid>
+
+        <!-- Row 7: Media control (shown when Media view is active) -->
+        <ScrollViewer x:Name="MediaContainer" Grid.Row="7" Visibility="Collapsed"
+                      Padding="6,0">
+            <StackPanel x:Name="MediaSessionList" Spacing="4"/>
+        </ScrollViewer>
 
         <!-- Row 8: Bottom bar -->
         <Grid x:Name="BottomBar" Grid.Row="8" Padding="10,6,10,8">

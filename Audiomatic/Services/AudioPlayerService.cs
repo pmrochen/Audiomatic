@@ -266,7 +266,7 @@ public sealed class AudioPlayerService : IDisposable
         return null;
     }
 
-    private async void UpdateSmtc(TrackInfo track)
+    private void UpdateSmtc(TrackInfo track)
     {
         try
         {
@@ -283,45 +283,51 @@ public sealed class AudioPlayerService : IDisposable
             updater.MusicProperties.Title = track.Title;
             updater.MusicProperties.Artist = track.Artist;
             updater.MusicProperties.AlbumTitle = track.Album;
+            updater.Update();
+        }
+        catch { }
+    }
 
-            // Try to set album art from embedded tag, then from folder cover file
-            try
+    /// <summary>
+    /// Sets SMTC thumbnail from artwork data already read by the caller.
+    /// Avoids a duplicate TagLib read.
+    /// </summary>
+    public void UpdateSmtcArtwork(byte[]? embeddedArtData, string? coverFilePath)
+    {
+        try
+        {
+            var updater = _mediaPlayer.SystemMediaTransportControls.DisplayUpdater;
+
+            if (embeddedArtData != null)
             {
-                bool found = false;
-                using var tagFile = TagLib.File.Create(track.Path);
-                if (tagFile.Tag.Pictures.Length > 0)
-                {
-                    var pic = tagFile.Tag.Pictures[0];
-                    var newStream = new InMemoryRandomAccessStream();
-                    var writer = new DataWriter(newStream.GetOutputStreamAt(0));
-                    writer.WriteBytes(pic.Data.Data);
-                    writer.StoreAsync().GetResults();
-                    updater.Thumbnail = RandomAccessStreamReference.CreateFromStream(newStream);
+                var newStream = new InMemoryRandomAccessStream();
+                var writer = new DataWriter(newStream.GetOutputStreamAt(0));
+                writer.WriteBytes(embeddedArtData);
+                writer.StoreAsync().GetResults();
+                updater.Thumbnail = RandomAccessStreamReference.CreateFromStream(newStream);
 
-                    _albumArtStream?.Dispose();
-                    _albumArtStream = newStream;
-                    found = true;
-                }
-
-                if (!found)
-                {
-                    var folder = System.IO.Path.GetDirectoryName(track.Path);
-                    if (folder != null)
-                    {
-                        var coverPath = FindCoverFile(folder);
-                        if (coverPath != null)
-                        {
-                            var file = await StorageFile.GetFileFromPathAsync(coverPath);
-                            updater.Thumbnail = RandomAccessStreamReference.CreateFromFile(file);
-                        }
-                    }
-                }
+                _albumArtStream?.Dispose();
+                _albumArtStream = newStream;
             }
-            catch { }
+            else if (coverFilePath != null)
+            {
+                var uri = new Uri(coverFilePath);
+                updater.Thumbnail = RandomAccessStreamReference.CreateFromUri(uri);
+            }
 
             updater.Update();
         }
         catch { }
+    }
+
+    public void SuspendPositionTimer()
+    {
+        _positionTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+    }
+
+    public void ResumePositionTimer()
+    {
+        _positionTimer?.Change(0, 250);
     }
 
     public void Dispose()

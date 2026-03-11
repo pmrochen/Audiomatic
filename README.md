@@ -57,6 +57,7 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 | **Playlist Detail** | View and reorder tracks within a playlist |
 | **Queue** | View and manage the current playback queue |
 | **Visualizer** | Real-time FFT spectrum analyzer with mirror mode |
+| **Media Control** | Monitor and control background media players (SMTC) |
 
 ### Metadata Editor
 
@@ -64,6 +65,14 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 - **Artwork management** — change cover art from file (JPG/PNG) or remove existing artwork
 - Writes tags back to the audio file via TagLibSharp
 - Automatically updates the library database and current playback display
+
+### Media Control
+
+- **Background media monitoring** — detect and display all active system media sessions
+- **Per-session cards** — thumbnail, app name, title, artist for each media source
+- **Playback controls** — play/pause, previous, next per session
+- **Timeline scrubbing** — seek within tracks with real-time position and duration display
+- **Live updates** — automatically refreshes when sessions start, stop, or change tracks
 
 ### Window & UI
 
