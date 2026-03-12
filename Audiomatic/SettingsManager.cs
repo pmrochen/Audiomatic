@@ -4,8 +4,8 @@ namespace Audiomatic;
 
 public record BackdropSettings(
     string Type = "acrylic",
-    double TintOpacity = 0.8,
-    double LuminosityOpacity = 0.9,
+    double TintOpacity = 1.0,
+    double LuminosityOpacity = 0.0,
     string TintColor = "#000000",
     string FallbackColor = "#1E1E1E",
     string Kind = "Base");
