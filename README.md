@@ -37,6 +37,15 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 - Clear queue or remove individual items
 - Queue state persisted across sessions (`queue.json`)
 
+### Radio Streaming
+
+- **Listen to online radio** — enter any HTTP/HTTPS stream URL to play live radio
+- **Station management** — rename and delete saved stations via Raycast-style context menu
+- **Persistent stations** — saved to `radio_stations.json`, restored on next launch
+- **Live indicator** — timeline shows "LIVE" with disabled seek bar
+- **Smart transport controls** — shuffle, repeat, previous, and next are disabled during radio playback
+- **Visualizer support** — real-time WASAPI loopback spectrum analysis for live streams
+
 ### Search & Sort
 
 - Real-time filtering by title, artist, or album
@@ -56,6 +65,7 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 | **Playlists** | Manage playlists and view track counts |
 | **Playlist Detail** | View and reorder tracks within a playlist |
 | **Queue** | View and manage the current playback queue |
+| **Radio** | Play online radio streams with station management |
 | **Visualizer** | Real-time FFT spectrum analyzer with mirror mode |
 | **Media Control** | Monitor and control background media players (SMTC) |
 
@@ -124,6 +134,7 @@ All application data is stored in `%LOCALAPPDATA%\Audiomatic\`:
 - `library.db` — SQLite database (tracks, playlists, favorites, folders)
 - `settings.json` — User preferences
 - `queue.json` — Current queue state
+- `radio_stations.json` — Saved radio stations
 
 ## Building
 

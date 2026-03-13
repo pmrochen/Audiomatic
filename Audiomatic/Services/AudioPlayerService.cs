@@ -30,6 +30,7 @@ public sealed class AudioPlayerService : IDisposable
     public event Action? MediaOpened;
     public event Action<string>? MediaFailed;
     public event Action<TimeSpan>? PositionChanged;
+    public event Action<bool>? BufferingChanged;
 
     public TrackInfo? CurrentTrack { get; private set; }
     public bool IsPlaying { get; private set; }
@@ -184,6 +185,79 @@ public sealed class AudioPlayerService : IDisposable
         }
     }
 
+    public bool IsStream { get; private set; }
+
+    public async Task PlayStreamAsync(Uri streamUri)
+    {
+        Stop();
+        IsStream = true;
+        _useNAudio = false;
+        CurrentTrack = null;
+
+        try
+        {
+            var source = MediaSource.CreateFromUri(streamUri);
+            var item = new MediaPlaybackItem(source);
+
+            _mediaPlayer.Source = item;
+
+            // Wait for the source to open before playing to let MediaPlayer buffer
+            var tcs = new TaskCompletionSource<bool>();
+            void onOpened(MediaPlayer mp, object args)
+            {
+                _mediaPlayer.MediaOpened -= onOpened;
+                tcs.TrySetResult(true);
+            }
+            void onFailed(MediaPlayer mp, MediaPlayerFailedEventArgs args)
+            {
+                _mediaPlayer.MediaFailed -= onFailed;
+                tcs.TrySetException(new Exception(args.ErrorMessage));
+            }
+            _mediaPlayer.MediaOpened += onOpened;
+            _mediaPlayer.MediaFailed += onFailed;
+
+            // Subscribe to buffering events
+            var session = _mediaPlayer.PlaybackSession;
+            session.BufferingStarted += (_, _) =>
+                _dispatcherQueue?.TryEnqueue(() => BufferingChanged?.Invoke(true));
+            session.BufferingEnded += (_, _) =>
+                _dispatcherQueue?.TryEnqueue(() => BufferingChanged?.Invoke(false));
+
+            _mediaPlayer.Volume = Volume;
+            _mediaPlayer.Play();
+
+            // Wait up to 15s for the stream to open
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            cts.Token.Register(() => tcs.TrySetException(new TimeoutException("Stream connection timed out")));
+            await tcs.Task;
+
+            IsPlaying = true;
+
+            var smtc = _mediaPlayer.SystemMediaTransportControls;
+            smtc.IsEnabled = true;
+            smtc.IsPlayEnabled = true;
+            smtc.IsPauseEnabled = true;
+            smtc.PlaybackStatus = MediaPlaybackStatus.Playing;
+
+            var updater = smtc.DisplayUpdater;
+            updater.Type = MediaPlaybackType.Music;
+            updater.MusicProperties.Title = "Radio Stream";
+            updater.MusicProperties.Artist = streamUri.Host;
+            updater.Update();
+
+            _dispatcherQueue?.TryEnqueue(() =>
+            {
+                PlaybackStarted?.Invoke();
+            });
+        }
+        catch (Exception ex)
+        {
+            IsStream = false;
+            _dispatcherQueue?.TryEnqueue(() => MediaFailed?.Invoke(ex.Message));
+            throw;
+        }
+    }
+
     public void Play()
     {
         if (_useNAudio)
@@ -228,6 +302,7 @@ public sealed class AudioPlayerService : IDisposable
             _mediaPlayer.Source = null;
         }
         IsPlaying = false;
+        IsStream = false;
         PlaybackStopped?.Invoke();
     }
 

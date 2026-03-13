@@ -1,6 +1,6 @@
 [Setup]
 AppName=Audiomatic
-AppVersion=0.0.3
+AppVersion=0.0.4
 AppPublisher=OhMyCode
 DefaultDirName={localappdata}\Programs\Audiomatic
 DefaultGroupName=Audiomatic
@@ -14,6 +14,11 @@ PrivilegesRequired=lowest
 UninstallDisplayIcon={app}\Audiomatic.exe
 WizardStyle=modern
 SetupIconFile=Audiomatic\app.ico
+ShowLanguageDialog=yes
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 
 [Files]
 Source: "Audiomatic\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -24,8 +29,12 @@ Name: "{autodesktop}\Audiomatic"; Filename: "{app}\Audiomatic.exe"; Tasks: deskt
 Name: "{userstartup}\Audiomatic"; Filename: "{app}\Audiomatic.exe"; Tasks: startupicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Raccourci sur le Bureau"; GroupDescription: "Raccourcis:"; Flags: checkedonce
-Name: "startupicon"; Description: "Lancer au démarrage de Windows"; GroupDescription: "Raccourcis:"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
+Name: "startupicon"; Description: "{cm:AutoStartProgram,Audiomatic}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Run]
-Filename: "{app}\Audiomatic.exe"; Description: "Lancer Audiomatic"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Audiomatic.exe"; Description: "{cm:LaunchProgram,Audiomatic}"; Flags: nowait postinstall skipifsilent
+
+[CustomMessages]
+english.AutoStartProgram=Start %1 with Windows
+french.AutoStartProgram=Lancer %1 au démarrage de Windows

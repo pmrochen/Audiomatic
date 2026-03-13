@@ -2,6 +2,8 @@ using System.Text.Json;
 
 namespace Audiomatic;
 
+public record RadioStation(string Url, string Name);
+
 public record BackdropSettings(
     string Type = "acrylic",
     double TintOpacity = 1.0,
@@ -79,6 +81,35 @@ public static class SettingsManager
     {
         var current = Load();
         Save(current with { Theme = theme });
+    }
+
+    // -- Radio stations persistence --
+
+    private static readonly string RadioPath = Path.Combine(SettingsDir, "radio_stations.json");
+
+    public static List<RadioStation> LoadRadioStations()
+    {
+        try
+        {
+            if (File.Exists(RadioPath))
+            {
+                var json = File.ReadAllText(RadioPath);
+                return JsonSerializer.Deserialize<List<RadioStation>>(json, JsonOpts) ?? [];
+            }
+        }
+        catch { }
+        return [];
+    }
+
+    public static void SaveRadioStations(List<RadioStation> stations)
+    {
+        try
+        {
+            Directory.CreateDirectory(SettingsDir);
+            var json = JsonSerializer.Serialize(stations, JsonOpts);
+            File.WriteAllText(RadioPath, json);
+        }
+        catch { }
     }
 
     private static AppSettings CreateDefault() => new(
