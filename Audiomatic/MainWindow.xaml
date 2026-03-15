@@ -273,6 +273,18 @@
                            TextTrimming="CharacterEllipsis" MaxLines="1"/>
             </StackPanel>
 
+            <!-- Album detail header (back + album name) -->
+            <StackPanel x:Name="AlbumHeader" Grid.Column="0" Orientation="Horizontal"
+                        Spacing="4" Visibility="Collapsed">
+                <Button Background="Transparent" BorderThickness="0" Padding="4,4"
+                        Click="AlbumBack_Click" ToolTipService.ToolTip="Back to albums">
+                    <FontIcon Glyph="&#xE72B;" FontSize="12"/>
+                </Button>
+                <TextBlock x:Name="AlbumNameText" VerticalAlignment="Center"
+                           FontSize="12" FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" MaxLines="1"/>
+            </StackPanel>
+
             <!-- New playlist button -->
             <Button x:Name="NewPlaylistBtn" Grid.Column="1" Background="Transparent"
                     BorderThickness="0" Padding="6,4" Click="NewPlaylist_Click"
@@ -445,6 +457,22 @@
                 </ListView.ItemContainerStyle>
             </ListView>
         </Grid>
+
+        <!-- Row 7: Albums grid (shown when Albums view is active) -->
+        <GridView x:Name="AlbumsGridView" Grid.Row="7"
+                  Visibility="Collapsed"
+                  Padding="6,0"
+                  SelectionMode="None"
+                  IsItemClickEnabled="True"
+                  ItemClick="AlbumGrid_ItemClick">
+            <GridView.ItemContainerStyle>
+                <Style TargetType="GridViewItem">
+                    <Setter Property="Margin" Value="4"/>
+                    <Setter Property="Padding" Value="0"/>
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                </Style>
+            </GridView.ItemContainerStyle>
+        </GridView>
 
         <!-- Row 7: Equalizer (shown when Equalizer view is active) -->
         <ScrollViewer x:Name="EqualizerContainer" Grid.Row="7" Visibility="Collapsed"

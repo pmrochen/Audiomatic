@@ -33,7 +33,7 @@ public sealed partial class MainWindow : Window
     private bool _sortAscending = true;
 
     // Playlist navigation
-    private enum ViewMode { Library, PlaylistList, PlaylistDetail, Queue, Radio, Podcast, PodcastEpisodes, Visualizer, Equalizer, MediaControl }
+    private enum ViewMode { Library, PlaylistList, PlaylistDetail, Queue, Radio, Podcast, PodcastEpisodes, Visualizer, Equalizer, MediaControl, Albums, AlbumDetail }
     private ViewMode _viewMode = ViewMode.Library;
     private PlaylistInfo? _currentPlaylist;
 
@@ -64,6 +64,9 @@ public sealed partial class MainWindow : Window
     private ToggleSwitch? _eqToggle;
     private bool _eqUiBuilt;
     private bool _eqUpdatingFromPreset;
+
+    // Albums
+    private string? _currentAlbumName;
 
     // View transition animation
     private bool _isViewTransitioning;
@@ -311,11 +314,14 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (_viewMode == ViewMode.Visualizer)
+        if (_viewMode == ViewMode.Visualizer || _viewMode == ViewMode.Albums)
             return;
 
         List<TrackInfo> source = _viewMode == ViewMode.PlaylistDetail && _currentPlaylist != null
             ? LibraryManager.GetPlaylistTracks(_currentPlaylist.Id)
+            : _viewMode == ViewMode.AlbumDetail && _currentAlbumName != null
+            ? _allTracks.Where(t => string.Equals(t.Album, _currentAlbumName, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(t => t.TrackNumber).ThenBy(t => t.Title).ToList()
             : _allTracks;
 
         var query = SearchBox.Text?.Trim() ?? "";
@@ -986,6 +992,11 @@ public sealed partial class MainWindow : Window
         NavPlaylists_Click(sender, e);
     }
 
+    private void AlbumBack_Click(object sender, RoutedEventArgs e)
+    {
+        NavAlbums_Click(sender, e);
+    }
+
     private async void NewPlaylist_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new ContentDialog
@@ -1009,10 +1020,12 @@ public sealed partial class MainWindow : Window
 
     private void UpdateNavigation()
     {
-        // Toggle tab bar vs playlist detail header
-        NavTabs.Visibility = _viewMode != ViewMode.PlaylistDetail
-            ? Visibility.Visible : Visibility.Collapsed;
+        // Toggle tab bar vs detail headers
+        var isDetailView = _viewMode == ViewMode.PlaylistDetail || _viewMode == ViewMode.AlbumDetail;
+        NavTabs.Visibility = !isDetailView ? Visibility.Visible : Visibility.Collapsed;
         PlaylistHeader.Visibility = _viewMode == ViewMode.PlaylistDetail
+            ? Visibility.Visible : Visibility.Collapsed;
+        AlbumHeader.Visibility = _viewMode == ViewMode.AlbumDetail
             ? Visibility.Visible : Visibility.Collapsed;
         NewPlaylistBtn.Visibility = _viewMode == ViewMode.PlaylistList
             ? Visibility.Visible : Visibility.Collapsed;
@@ -1034,17 +1047,22 @@ public sealed partial class MainWindow : Window
         SetTab(NavQueueText, _viewMode == ViewMode.Queue);
         SetTab(NavRadioText, _viewMode == ViewMode.Radio);
         SetTab(NavPodcastText, _viewMode == ViewMode.Podcast || _viewMode == ViewMode.PodcastEpisodes);
-        SetTab(NavMoreText, _viewMode == ViewMode.Visualizer || _viewMode == ViewMode.Equalizer || _viewMode == ViewMode.MediaControl);
+        SetTab(NavMoreText, _viewMode == ViewMode.Visualizer || _viewMode == ViewMode.Equalizer
+            || _viewMode == ViewMode.MediaControl || _viewMode == ViewMode.Albums || _viewMode == ViewMode.AlbumDetail);
 
         // Show/hide search & sort
-        SearchSortRow.Visibility = (_viewMode == ViewMode.Library || _viewMode == ViewMode.PlaylistDetail)
+        SearchSortRow.Visibility = (_viewMode == ViewMode.Library || _viewMode == ViewMode.PlaylistDetail
+            || _viewMode == ViewMode.AlbumDetail)
             ? Visibility.Visible : Visibility.Collapsed;
 
         // Show/hide content containers based on view mode
         var isPodcast = _viewMode == ViewMode.Podcast || _viewMode == ViewMode.PodcastEpisodes;
-        var isTrackView = _viewMode != ViewMode.Visualizer && _viewMode != ViewMode.MediaControl
-            && _viewMode != ViewMode.Radio && _viewMode != ViewMode.Equalizer && !isPodcast;
+        var isTrackView = _viewMode == ViewMode.Library || _viewMode == ViewMode.PlaylistList
+            || _viewMode == ViewMode.PlaylistDetail || _viewMode == ViewMode.Queue
+            || _viewMode == ViewMode.AlbumDetail;
         TrackListView.Visibility = isTrackView ? Visibility.Visible : Visibility.Collapsed;
+        AlbumsGridView.Visibility = _viewMode == ViewMode.Albums
+            ? Visibility.Visible : Visibility.Collapsed;
         WaveformContainer.Visibility = _viewMode == ViewMode.Visualizer
             ? Visibility.Visible : Visibility.Collapsed;
         EqualizerContainer.Visibility = _viewMode == ViewMode.Equalizer
@@ -1056,9 +1074,11 @@ public sealed partial class MainWindow : Window
         MediaContainer.Visibility = _viewMode == ViewMode.MediaControl
             ? Visibility.Visible : Visibility.Collapsed;
 
-        // Playlist detail name
+        // Detail header names
         if (_currentPlaylist != null)
             PlaylistNameText.Text = _currentPlaylist.Name;
+        if (_currentAlbumName != null)
+            AlbumNameText.Text = _currentAlbumName;
     }
 
     private void AnimateViewTransition(Action buildNewContent, bool slideFromRight = true)
@@ -1071,6 +1091,7 @@ public sealed partial class MainWindow : Window
             : _viewMode == ViewMode.Equalizer ? EqualizerContainer
             : _viewMode == ViewMode.MediaControl ? MediaContainer
             : _viewMode == ViewMode.Radio ? RadioContainer
+            : _viewMode == ViewMode.Albums ? AlbumsGridView
             : (_viewMode == ViewMode.Podcast || _viewMode == ViewMode.PodcastEpisodes) ? PodcastContainer
             : TrackListView;
 
@@ -1114,6 +1135,7 @@ public sealed partial class MainWindow : Window
                 : _viewMode == ViewMode.Equalizer ? EqualizerContainer
                 : _viewMode == ViewMode.MediaControl ? MediaContainer
                 : _viewMode == ViewMode.Radio ? RadioContainer
+                : _viewMode == ViewMode.Albums ? AlbumsGridView
                 : (_viewMode == ViewMode.Podcast || _viewMode == ViewMode.PodcastEpisodes) ? PodcastContainer
                 : TrackListView;
 
@@ -2441,6 +2463,9 @@ public sealed partial class MainWindow : Window
         flyout.FlyoutPresenterStyle = ActionPanel.CreateFlyoutPresenterStyle(minWidth: 160, maxWidth: 200);
 
         var panel = new StackPanel { Spacing = 0 };
+        panel.Children.Add(ActionPanel.CreateButton("\uE93F", "Albums", [],
+            () => { flyout.Hide(); NavAlbums_Click(sender, e); },
+            isActive: _viewMode == ViewMode.Albums || _viewMode == ViewMode.AlbumDetail));
         panel.Children.Add(ActionPanel.CreateButton("\uE9D9", "Visualizer", [],
             () => { flyout.Hide(); NavVisualizer_Click(sender, e); },
             isActive: _viewMode == ViewMode.Visualizer));
@@ -2453,6 +2478,184 @@ public sealed partial class MainWindow : Window
 
         flyout.Content = panel;
         flyout.ShowAt(sender as FrameworkElement ?? NavMoreBtn);
+    }
+
+    // -- Albums ---------------------------------------------------
+
+    private void NavAlbums_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewMode == ViewMode.Albums) return;
+        _viewMode = ViewMode.Albums;
+        _currentPlaylist = null;
+        _currentAlbumName = null;
+        UpdateNavigation();
+        UpdateSpectrumTimer();
+        UpdateMediaTimer();
+        AnimateViewTransition(() => BuildAlbumsGrid());
+    }
+
+    private void BuildAlbumsGrid()
+    {
+        AlbumsGridView.Items.Clear();
+
+        var albumGroups = _allTracks
+            .Where(t => !string.IsNullOrWhiteSpace(t.Album))
+            .GroupBy(t => t.Album, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (
+                Album: g.Key,
+                Artist: g.GroupBy(t => t.Artist).OrderByDescending(ag => ag.Count()).First().Key,
+                TrackCount: g.Count(),
+                SampleTrackPath: g.First().Path
+            ))
+            .OrderBy(a => a.Album)
+            .ToList();
+
+        TrackCountText.Text = $"{albumGroups.Count:N0} albums";
+
+        foreach (var album in albumGroups)
+        {
+            var card = new StackPanel
+            {
+                Width = 150,
+                Spacing = 4,
+                Padding = new Thickness(4),
+                Tag = album.Album
+            };
+
+            // Album art container
+            var artGrid = new Grid
+            {
+                Width = 142,
+                Height = 142,
+                CornerRadius = new CornerRadius(8),
+                Background = (Brush)Application.Current.Resources["CardBackgroundFillColorSecondaryBrush"]
+            };
+
+            var artImage = new Image
+            {
+                Stretch = Stretch.UniformToFill,
+                Width = 142,
+                Height = 142,
+                Visibility = Visibility.Collapsed
+            };
+
+            var placeholder = new FontIcon
+            {
+                Glyph = "\uE93C",
+                FontSize = 36,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = ThemeHelper.Brush("TextFillColorTertiaryBrush")
+            };
+
+            artGrid.Children.Add(placeholder);
+            artGrid.Children.Add(artImage);
+            card.Children.Add(artGrid);
+
+            // Album title
+            card.Children.Add(new TextBlock
+            {
+                Text = album.Album,
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxLines = 1,
+                Margin = new Thickness(2, 2, 0, 0)
+            });
+
+            // Artist + track count
+            var artistText = string.IsNullOrWhiteSpace(album.Artist) ? "" : album.Artist;
+            card.Children.Add(new TextBlock
+            {
+                Text = $"{artistText} \u00B7 {album.TrackCount} tracks",
+                FontSize = 11,
+                Foreground = ThemeHelper.Brush("TextFillColorSecondaryBrush"),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxLines = 1,
+                Margin = new Thickness(2, 0, 0, 0)
+            });
+
+            AlbumsGridView.Items.Add(card);
+
+            // Load artwork async
+            var capturedImage = artImage;
+            var capturedPlaceholder = placeholder;
+            var capturedPath = album.SampleTrackPath;
+            _ = LoadAlbumCardArtAsync(capturedImage, capturedPlaceholder, capturedPath);
+        }
+
+        if (albumGroups.Count == 0)
+        {
+            var empty = new TextBlock
+            {
+                Text = "No albums found. Add music folders in Settings.",
+                Foreground = ThemeHelper.Brush("TextFillColorTertiaryBrush"),
+                FontSize = 13,
+                Margin = new Thickness(8)
+            };
+            AlbumsGridView.Items.Add(empty);
+        }
+    }
+
+    private async Task LoadAlbumCardArtAsync(Image artImage, FontIcon placeholder, string trackPath)
+    {
+        try
+        {
+            byte[]? artData = null;
+            string? coverPath = null;
+
+            await Task.Run(() =>
+            {
+                try
+                {
+                    using var tagFile = TagLib.File.Create(trackPath);
+                    if (tagFile.Tag.Pictures.Length > 0)
+                        artData = tagFile.Tag.Pictures[0].Data.Data;
+                }
+                catch { }
+
+                if (artData == null)
+                {
+                    var folder = System.IO.Path.GetDirectoryName(trackPath);
+                    if (folder != null)
+                        coverPath = FindCoverFile(folder);
+                }
+            });
+
+            if (artData != null)
+            {
+                using var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+                using var writer = new Windows.Storage.Streams.DataWriter(stream.GetOutputStreamAt(0));
+                writer.WriteBytes(artData);
+                await writer.StoreAsync();
+                stream.Seek(0);
+
+                var bitmap = new BitmapImage { DecodePixelWidth = 142 };
+                bitmap.SetSource(stream);
+                artImage.Source = bitmap;
+                artImage.Visibility = Visibility.Visible;
+                placeholder.Visibility = Visibility.Collapsed;
+            }
+            else if (coverPath != null)
+            {
+                var bitmap = new BitmapImage { DecodePixelWidth = 142, UriSource = new Uri(coverPath) };
+                artImage.Source = bitmap;
+                artImage.Visibility = Visibility.Visible;
+                placeholder.Visibility = Visibility.Collapsed;
+            }
+        }
+        catch { }
+    }
+
+    private void AlbumGrid_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is not StackPanel card || card.Tag is not string albumName) return;
+
+        _currentAlbumName = albumName;
+        _viewMode = ViewMode.AlbumDetail;
+        _currentPlaylist = null;
+        UpdateNavigation();
+        AnimateViewTransition(() => ApplyFilterAndSort());
     }
 
     // -- Equalizer ------------------------------------------------
@@ -4184,12 +4387,16 @@ public sealed partial class MainWindow : Window
             MiniPlayerBar.Visibility = Visibility.Collapsed;
             VolumeRow.Visibility = Visibility.Visible;
             NavRow.Visibility = Visibility.Visible;
-            SearchSortRow.Visibility = (_viewMode == ViewMode.Library || _viewMode == ViewMode.PlaylistDetail)
+            SearchSortRow.Visibility = (_viewMode == ViewMode.Library || _viewMode == ViewMode.PlaylistDetail
+                || _viewMode == ViewMode.AlbumDetail)
                 ? Visibility.Visible : Visibility.Collapsed;
             var isPodcast = _viewMode == ViewMode.Podcast || _viewMode == ViewMode.PodcastEpisodes;
-            var isTrackView = _viewMode != ViewMode.Visualizer && _viewMode != ViewMode.MediaControl
-                && _viewMode != ViewMode.Radio && _viewMode != ViewMode.Equalizer && !isPodcast;
+            var isTrackView = _viewMode == ViewMode.Library || _viewMode == ViewMode.PlaylistList
+                || _viewMode == ViewMode.PlaylistDetail || _viewMode == ViewMode.Queue
+                || _viewMode == ViewMode.AlbumDetail;
             TrackListView.Visibility = isTrackView ? Visibility.Visible : Visibility.Collapsed;
+            AlbumsGridView.Visibility = _viewMode == ViewMode.Albums
+                ? Visibility.Visible : Visibility.Collapsed;
             WaveformContainer.Visibility = _viewMode == ViewMode.Visualizer
                 ? Visibility.Visible : Visibility.Collapsed;
             EqualizerContainer.Visibility = _viewMode == ViewMode.Equalizer
@@ -4214,6 +4421,7 @@ public sealed partial class MainWindow : Window
             // Hide everything immediately before animation
             CustomTitleBar.Visibility = Visibility.Collapsed;
             NowPlayingCard.Visibility = Visibility.Collapsed;
+            AlbumsGridView.Visibility = Visibility.Collapsed;
             VolumeRow.Visibility = Visibility.Collapsed;
             NavRow.Visibility = Visibility.Collapsed;
             SearchSortRow.Visibility = Visibility.Collapsed;
@@ -4252,6 +4460,7 @@ public sealed partial class MainWindow : Window
                 NavRow.Visibility = Visibility.Collapsed;
                 SearchSortRow.Visibility = Visibility.Collapsed;
                 TrackListView.Visibility = Visibility.Collapsed;
+                AlbumsGridView.Visibility = Visibility.Collapsed;
                 WaveformContainer.Visibility = Visibility.Collapsed;
                 EqualizerContainer.Visibility = Visibility.Collapsed;
                 MediaContainer.Visibility = Visibility.Collapsed;
@@ -4267,6 +4476,7 @@ public sealed partial class MainWindow : Window
                 NavRow.Visibility = Visibility.Collapsed;
                 SearchSortRow.Visibility = Visibility.Collapsed;
                 TrackListView.Visibility = Visibility.Collapsed;
+                AlbumsGridView.Visibility = Visibility.Collapsed;
                 WaveformContainer.Visibility = Visibility.Collapsed;
                 EqualizerContainer.Visibility = Visibility.Collapsed;
                 MediaContainer.Visibility = Visibility.Collapsed;

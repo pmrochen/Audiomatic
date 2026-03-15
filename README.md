@@ -10,7 +10,7 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 
 ### Audio Playback
 
-- **Dual audio engine** — MediaPlayer for standard formats, NAudio (WASAPI) for advanced ones
+- **NAudio-powered engine** — all file playback routed through NAudio (WASAPI) with equalizer processing; MediaPlayer used for radio streams
 - **Supported formats**: MP3, FLAC, WAV, OGG, AAC, WMA, M4A, OPUS, APE, AIFF
 - **Playback controls**: Play/Pause, Previous, Next, timeline seeking
 - **Volume control** with mute toggle and dynamic icon states
@@ -56,6 +56,14 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 - **Manual toggle** — mark episodes as read or unread via Raycast-style context menu
 - **Subscription management** — unsubscribe from podcasts via context menu
 
+### Equalizer
+
+- **10-band graphic equalizer** — adjustable gain per band (-12 to +12 dB) at 32, 64, 125, 250, 500, 1k, 2k, 4k, 8k, and 16k Hz
+- **Presets** — Flat, Bass Boost, Treble Boost, Rock, Pop, Jazz, Classical, Electronic, Hip-Hop, Vocal
+- **Preamp control** — global gain adjustment (-12 to +12 dB)
+- **Enable/disable toggle** — bypass the equalizer without losing your settings
+- **Persistent settings** — band gains, preset, preamp, and enabled state saved across sessions
+
 ### Search & Sort
 
 - Real-time filtering by title, artist, or album
@@ -77,6 +85,7 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 | **Queue** | View and manage the current playback queue |
 | **Radio** | Play online radio streams with station management |
 | **Podcasts** | Search, subscribe, browse episodes, and play podcasts |
+| **Equalizer** | 10-band graphic EQ with presets, preamp, and per-band control |
 | **Visualizer** | Real-time FFT spectrum analyzer with mirror mode (via "..." menu) |
 | **Media Control** | Monitor and control background media players via "..." menu |
 
@@ -104,6 +113,7 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 - **Always-on-Top** pin mode
 - **Backdrop options**: Acrylic, Mica, Mica Alt, None
 - **Theme support**: System, Light, Dark
+- **Custom accent colors** — 24 preset color swatches + custom hex input, applied across all themes
 - **Window position** remembered across restarts
 - **Custom draggable title bar**
 - **Raycast-style context menus** for tracks, playlists, and queue items
@@ -123,7 +133,9 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 
 - Library management (add folders, rescan, reset)
 - Backdrop and theme selection
+- Custom accent color picker (24 presets + hex input)
 - Display mode cycling and pin-on-top toggles
+- Equalizer configuration (bands, presets, preamp)
 - Visualizer FPS selection (30 / 60 FPS)
 - All preferences persisted in `settings.json`
 
