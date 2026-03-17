@@ -8,7 +8,7 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 
 ![Audiomatic](https://res.cloudinary.com/dptrimoqv/image/upload/v1773230722/158shots_so_jvlq5x.png)
 
-[Download](https://github.com/devohmycode/Audiomatic/releases/download/v0.0.3/Audiomatic-Setup-x64.exe)
+[Download](https://github.com/devohmycode/Audiomatic/releases/download/v0.1.0/Audiomatic-Setup-x64.exe)
 
 ## Features
 
