@@ -1,3 +1,5 @@
+using Audiomatic;
+
 namespace Audiomatic.Models;
 
 public sealed class TrackInfo
@@ -20,13 +22,7 @@ public sealed class TrackInfo
 
     public string DurationFormatted
     {
-        get
-        {
-            var ts = TimeSpan.FromMilliseconds(DurationMs);
-            return ts.TotalHours >= 1
-                ? $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}"
-                : $"{(int)ts.TotalMinutes}:{ts.Seconds:D2}";
-        }
+        get => TrackDurationHelper.FormatDuration(DurationMs);
     }
 
     public override string ToString() => $"{Artist} - {Title}";

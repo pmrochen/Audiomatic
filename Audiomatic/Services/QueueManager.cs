@@ -16,6 +16,8 @@ public sealed class QueueManager
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Audiomatic");
     private static readonly string QueuePath = Path.Combine(QueueDir, "queue.json");
 
+    private double _savedPositionSeconds;
+
     public event Action? QueueChanged;
     public event Action<TrackInfo>? TrackChanged;
 
@@ -39,6 +41,11 @@ public sealed class QueueManager
     {
         get => _repeat;
         set => _repeat = value;
+    }
+    public double SavedPositionSeconds
+    {
+        get => _savedPositionSeconds;
+        set => _savedPositionSeconds = value;
     }
 
     // ── Queue setup ──────────────────────────────────────────
@@ -267,7 +274,8 @@ public sealed class QueueManager
                 TrackPaths = _originalQueue.Select(t => t.Path).ToList(),
                 CurrentIndex = _currentIndex,
                 Shuffle = _shuffle,
-                Repeat = _repeat.ToString()
+                Repeat = _repeat.ToString(),
+                PositionSeconds = _savedPositionSeconds
             };
             var json = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(QueuePath, json);
@@ -299,6 +307,7 @@ public sealed class QueueManager
                 _currentIndex = Math.Clamp(state.CurrentIndex, 0, queue.Count - 1);
                 _shuffle = state.Shuffle;
                 _repeat = Enum.TryParse<RepeatMode>(state.Repeat, out var rm) ? rm : RepeatMode.None;
+                _savedPositionSeconds = state.PositionSeconds;
 
                 if (_shuffle)
                     ShuffleQueue();
@@ -307,11 +316,29 @@ public sealed class QueueManager
         catch { }
     }
 
+    public void RefreshTrackMetadata(IEnumerable<TrackInfo> tracks)
+    {
+        var tracksByPath = tracks.ToDictionary(t => t.Path, StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < _originalQueue.Count; i++)
+        {
+            if (tracksByPath.TryGetValue(_originalQueue[i].Path, out var updated))
+                _originalQueue[i] = updated;
+        }
+
+        for (int i = 0; i < _playQueue.Count; i++)
+        {
+            if (tracksByPath.TryGetValue(_playQueue[i].Path, out var updated))
+                _playQueue[i] = updated;
+        }
+    }
+
     private sealed class QueueState
     {
         public List<string> TrackPaths { get; set; } = [];
         public int CurrentIndex { get; set; }
         public bool Shuffle { get; set; }
         public string Repeat { get; set; } = "None";
+        public double PositionSeconds { get; set; }
     }
 }

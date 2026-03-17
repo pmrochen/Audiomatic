@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Audiomatic;
 using Audiomatic.Models;
 using Microsoft.Data.Sqlite;
 
@@ -176,14 +177,14 @@ public static class LibraryManager
         EnablePragmas(conn);
 
         // Get existing paths for this folder
-        var existingPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var existingTracks = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT path FROM tracks WHERE folder_id = @fid;";
+            cmd.CommandText = "SELECT path, last_modified FROM tracks WHERE folder_id = @fid;";
             cmd.Parameters.AddWithValue("@fid", folderId);
             using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
-                existingPaths.Add(reader.GetString(0));
+                existingTracks[reader.GetString(0)] = reader.GetInt64(1);
         }
 
         using var transaction = conn.BeginTransaction();
@@ -193,9 +194,11 @@ public static class LibraryManager
             ct.ThrowIfCancellationRequested();
             scanned++;
 
-            if (existingPaths.Contains(filePath))
+            var fileLastModified = new DateTimeOffset(File.GetLastWriteTimeUtc(filePath)).ToUnixTimeSeconds();
+            if (existingTracks.TryGetValue(filePath, out var storedLastModified)
+                && storedLastModified == fileLastModified)
             {
-                existingPaths.Remove(filePath); // still exists
+                existingTracks.Remove(filePath); // still exists and metadata unchanged
                 continue;
             }
 
@@ -203,7 +206,8 @@ public static class LibraryManager
             {
                 var track = await Task.Run(() => ReadMetadata(filePath, folderId), ct);
                 InsertTrack(conn, track, transaction);
-                added++;
+                if (!existingTracks.Remove(filePath))
+                    added++;
             }
             catch { }
 
@@ -212,7 +216,7 @@ public static class LibraryManager
         }
 
         // Remove tracks whose files no longer exist
-        foreach (var removed in existingPaths)
+        foreach (var removed in existingTracks.Keys)
         {
             using var delCmd = conn.CreateCommand();
             delCmd.CommandText = "DELETE FROM tracks WHERE path = @path;";
@@ -240,6 +244,7 @@ public static class LibraryManager
     {
         using var tagFile = TagLib.File.Create(filePath);
         var fi = new FileInfo(filePath);
+        var durationMs = TrackDurationHelper.ResolveDurationMs(filePath, tagFile.Properties.Duration);
 
         return new TrackInfo
         {
@@ -249,7 +254,7 @@ public static class LibraryManager
                 : tagFile.Tag.Title.Trim(),
             Artist = tagFile.Tag.FirstPerformer?.Trim() ?? "",
             Album = tagFile.Tag.Album?.Trim() ?? "",
-            DurationMs = (int)tagFile.Properties.Duration.TotalMilliseconds,
+            DurationMs = durationMs,
             TrackNumber = (int)tagFile.Tag.Track,
             Year = (int)tagFile.Tag.Year,
             Genre = tagFile.Tag.FirstGenre ?? "",
@@ -284,6 +289,69 @@ public static class LibraryManager
         cmd.Parameters.AddWithValue("@lm", t.LastModified);
         cmd.Parameters.AddWithValue("@ca", t.CreatedAt);
         cmd.ExecuteNonQuery();
+    }
+
+    public static async Task<int> RefreshAllTrackDurationsAsync(
+        IProgress<(int processed, int total)>? progress = null,
+        CancellationToken ct = default)
+    {
+        var tracks = new List<(long id, string path, int durationMs)>();
+
+        using var conn = new SqliteConnection(ConnectionString);
+        await conn.OpenAsync(ct);
+        EnablePragmas(conn);
+
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT id, path, duration_ms FROM tracks ORDER BY id;";
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                tracks.Add((
+                    reader.GetInt64(0),
+                    reader.GetString(1),
+                    reader.GetInt32(2)));
+            }
+        }
+
+        if (tracks.Count == 0)
+        {
+            progress?.Report((0, 0));
+            return 0;
+        }
+
+        using var transaction = conn.BeginTransaction();
+        using var updateCmd = conn.CreateCommand();
+        updateCmd.Transaction = transaction;
+        updateCmd.CommandText = "UPDATE tracks SET duration_ms = @dur WHERE id = @id;";
+        var durationParam = updateCmd.Parameters.Add("@dur", SqliteType.Integer);
+        var idParam = updateCmd.Parameters.Add("@id", SqliteType.Integer);
+        updateCmd.Prepare();
+
+        int updated = 0;
+        for (int i = 0; i < tracks.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var track = tracks[i];
+
+            var refreshedDuration = await Task.Run(
+                () => TrackDurationHelper.ResolveDurationMs(track.path, TimeSpan.FromMilliseconds(track.durationMs)),
+                ct);
+
+            if (refreshedDuration > 0 &&
+                (track.durationMs <= 0 || Math.Abs(refreshedDuration - track.durationMs) >= 500))
+            {
+                durationParam.Value = refreshedDuration;
+                idParam.Value = track.id;
+                await updateCmd.ExecuteNonQueryAsync(ct);
+                updated++;
+            }
+
+            progress?.Report((i + 1, tracks.Count));
+        }
+
+        transaction.Commit();
+        return updated;
     }
 
     private static string ComputeFileHash(string path)

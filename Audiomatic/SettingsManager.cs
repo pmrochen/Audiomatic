@@ -32,7 +32,8 @@ public record AppSettings(
     string EqPreset = "Flat",
     float[]? EqBands = null,       // 10-band gains in dB (-12 to +12)
     float EqPreamp = 0f,
-    string AccentColor = "");      // hex string, empty = system accent
+    string AccentColor = "",       // hex string, empty = system accent
+    int DurationDataVersion = 0);
 
 public static class SettingsManager
 {

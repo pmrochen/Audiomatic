@@ -1,4 +1,5 @@
 using Audiomatic.Models;
+using Audiomatic;
 using NAudio.Wave;
 using Windows.Media;
 using Windows.Media.Core;
@@ -37,6 +38,10 @@ public sealed class AudioPlayerService : IDisposable
     private SpeedControlSampleProvider? _nextSpeedProvider;
     private TrackInfo? _nextTrack;
     private bool _gaplessTransitioning;
+    private TimeSpan _nextTrueDuration;
+
+    // Accurate duration via Media Foundation (NAudio's AudioFileReader can be off by several seconds)
+    private TimeSpan _trueDuration;
 
     // NAudio-supported but not natively by MediaPlayer
     private static readonly HashSet<string> NAudioOnlyExtensions =
@@ -68,8 +73,8 @@ public sealed class AudioPlayerService : IDisposable
     {
         get
         {
-            if (_useNAudio && _audioReader != null)
-                return _audioReader.TotalTime;
+            if (_useNAudio)
+                return _trueDuration > TimeSpan.Zero ? _trueDuration : (_audioReader?.TotalTime ?? TimeSpan.Zero);
             return _mediaPlayer.NaturalDuration;
         }
     }
@@ -98,22 +103,34 @@ public sealed class AudioPlayerService : IDisposable
 
     private Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
     private System.Threading.Timer? _positionTimer;
+    private bool _mediaEndedFired;
 
     public AudioPlayerService()
     {
+        // Disable automatic command handling so other apps (YouTube, etc.)
+        // cannot pause our playback through system media transport commands.
+        _mediaPlayer.CommandManager.IsEnabled = false;
+
         _mediaPlayer.MediaEnded += (_, _) =>
         {
-            IsPlaying = false;
-            _dispatcherQueue?.TryEnqueue(() => MediaEnded?.Invoke());
+            if (!_useNAudio)
+            {
+                IsPlaying = false;
+                _dispatcherQueue?.TryEnqueue(() => MediaEnded?.Invoke());
+            }
         };
         _mediaPlayer.MediaOpened += (_, _) =>
         {
-            _dispatcherQueue?.TryEnqueue(() => MediaOpened?.Invoke());
+            if (!_useNAudio)
+                _dispatcherQueue?.TryEnqueue(() => MediaOpened?.Invoke());
         };
         _mediaPlayer.MediaFailed += (_, args) =>
         {
-            IsPlaying = false;
-            _dispatcherQueue?.TryEnqueue(() => MediaFailed?.Invoke(args.ErrorMessage));
+            if (!_useNAudio)
+            {
+                IsPlaying = false;
+                _dispatcherQueue?.TryEnqueue(() => MediaFailed?.Invoke(args.ErrorMessage));
+            }
         };
 
         _positionTimer = new System.Threading.Timer(_ =>
@@ -151,12 +168,15 @@ public sealed class AudioPlayerService : IDisposable
     {
         Stop();
         CurrentTrack = track;
+        _mediaEndedFired = false;
 
         // Always use NAudio for file playback (enables equalizer)
         _useNAudio = true;
         try
         {
             _audioReader = new AudioFileReader(track.Path);
+            _trueDuration = TrackDurationHelper.ResolveDuration(track.Path, _audioReader.TotalTime);
+
             _equalizer = new Equalizer(_audioReader);
             _equalizer.Enabled = _eqEnabled;
             _equalizer.SetAllBands(_eqGains);
@@ -170,6 +190,8 @@ public sealed class AudioPlayerService : IDisposable
             _gaplessProvider.SourceTransitioned += OnGaplessTransition;
             _gaplessProvider.PlaybackEnded += () =>
             {
+                if (_mediaEndedFired) return;
+                _mediaEndedFired = true;
                 IsPlaying = false;
                 _dispatcherQueue?.TryEnqueue(() => MediaEnded?.Invoke());
             };
@@ -178,10 +200,11 @@ public sealed class AudioPlayerService : IDisposable
             _waveOut.Init(new NAudio.Wave.SampleProviders.SampleToWaveProvider16(_gaplessProvider));
             _waveOut.PlaybackStopped += (_, _) =>
             {
-                // Only fire MediaEnded for non-gapless stops (e.g., user pressed stop)
-                if (!_gaplessTransitioning && _audioReader != null
+                if (_mediaEndedFired || _gaplessTransitioning) return;
+                if (_audioReader != null
                     && _audioReader.CurrentTime >= _audioReader.TotalTime - TimeSpan.FromMilliseconds(500))
                 {
+                    _mediaEndedFired = true;
                     IsPlaying = false;
                     _dispatcherQueue?.TryEnqueue(() => MediaEnded?.Invoke());
                 }
@@ -233,6 +256,8 @@ public sealed class AudioPlayerService : IDisposable
             _nextAudioReader.Volume = _isMuted ? 0f : (float)_volume;
             _nextSpeedProvider = new SpeedControlSampleProvider(_nextEqualizer) { Speed = _playbackSpeed };
 
+            _nextTrueDuration = TrackDurationHelper.ResolveDuration(track.Path, _nextAudioReader.TotalTime);
+
             _nextTrack = track;
             _gaplessProvider.QueueNext(_nextSpeedProvider);
         }
@@ -254,9 +279,11 @@ public sealed class AudioPlayerService : IDisposable
         _audioReader = _nextAudioReader;
         _equalizer = _nextEqualizer;
         _speedProvider = _nextSpeedProvider;
+        _trueDuration = _nextTrueDuration;
         _nextAudioReader = null;
         _nextEqualizer = null;
         _nextSpeedProvider = null;
+        _nextTrueDuration = TimeSpan.Zero;
 
         var transitionedTrack = _nextTrack;
         _nextTrack = null;
@@ -288,6 +315,7 @@ public sealed class AudioPlayerService : IDisposable
         _nextEqualizer = null;
         _nextSpeedProvider = null;
         _nextTrack = null;
+        _nextTrueDuration = TimeSpan.Zero;
     }
 
     /// <summary>
@@ -299,7 +327,8 @@ public sealed class AudioPlayerService : IDisposable
         get
         {
             if (!_useNAudio || _audioReader == null) return -1;
-            return (_audioReader.TotalTime - _audioReader.CurrentTime).TotalSeconds / _playbackSpeed;
+            var total = _trueDuration > TimeSpan.Zero ? _trueDuration : _audioReader.TotalTime;
+            return (total - _audioReader.CurrentTime).TotalSeconds / _playbackSpeed;
         }
     }
 
@@ -407,6 +436,7 @@ public sealed class AudioPlayerService : IDisposable
 
     public void Stop()
     {
+        _mediaEndedFired = true; // Prevent spurious MediaEnded during teardown
         if (_useNAudio)
         {
             _gaplessProvider?.ClearNext();
@@ -426,6 +456,7 @@ public sealed class AudioPlayerService : IDisposable
         IsPlaying = false;
         IsStream = false;
         _gaplessTransitioning = false;
+        _trueDuration = TimeSpan.Zero;
         PlaybackStopped?.Invoke();
     }
 

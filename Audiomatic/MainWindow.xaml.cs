@@ -238,15 +238,7 @@ public sealed partial class MainWindow : Window
 
         // Restore queue state (display info only, not playing yet)
         _queue.LoadState(_allTracks);
-        if (_queue.CurrentTrack != null)
-        {
-            var t = _queue.CurrentTrack;
-            TrackTitle.Text = t.Title;
-            TrackArtist.Text = t.Artist;
-            TrackAlbum.Text = t.Album;
-            LoadAlbumArt(t.Path);
-            UpdateMiniPlayer(t);
-        }
+        RestoreQueuePreview();
 
         // Restore shuffle/repeat
         _queue.Shuffle = settings.ShuffleEnabled;
@@ -282,6 +274,7 @@ public sealed partial class MainWindow : Window
             UnregisterHotKey(_hwnd, HOTKEY_ID);
             UnregisterHotKey(_hwnd, HOTKEY_COLLAPSE_ID);
             RemoveTrayIcon();
+            _queue.SavedPositionSeconds = _player.Position.TotalSeconds;
             _queue.SaveState();
             SavePodcastProgressNow();
             var s = SettingsManager.Load();
@@ -578,13 +571,29 @@ public sealed partial class MainWindow : Window
             _isSeeking = true;
             TimelineSlider.Maximum = dur.TotalSeconds;
             TimelineSlider.Value = 0;
-            DurationText.Text = FormatTime(dur);
+            DurationText.Text = TrackDurationHelper.FormatDuration(dur);
             PositionText.Text = "0:00";
             _isSeeking = false;
         }
     }
 
+    private bool _isHandlingMediaEnded;
+
     private async void OnMediaEnded()
+    {
+        if (_isHandlingMediaEnded) return;
+        _isHandlingMediaEnded = true;
+        try
+        {
+            await HandleMediaEndedAsync();
+        }
+        finally
+        {
+            _isHandlingMediaEnded = false;
+        }
+    }
+
+    private async Task HandleMediaEndedAsync()
     {
         // Auto-mark podcast episode as read when playback ends
         if (_currentEpisode != null)
@@ -809,8 +818,27 @@ public sealed partial class MainWindow : Window
 
         if (_player.CurrentTrack == null)
         {
-            // Start playing first track if nothing is loaded
-            if (_displayedTracks.Count > 0)
+            // Resume from saved queue state if available
+            if (_queue.CurrentTrack != null)
+            {
+                var track = _queue.CurrentTrack;
+                try
+                {
+                    await _player.PlayTrackAsync(track);
+                    // Seek to saved position
+                    if (_queue.SavedPositionSeconds > 1)
+                    {
+                        _player.Seek(TimeSpan.FromSeconds(_queue.SavedPositionSeconds));
+                        _queue.SavedPositionSeconds = 0;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    TrackArtist.Text = $"Error: {ex.Message}";
+                }
+                UpdateNowPlaying(track);
+            }
+            else if (_displayedTracks.Count > 0)
             {
                 _queue.SetQueue(_displayedTracks, 0);
                 var track = _queue.CurrentTrack!;
@@ -3977,6 +4005,7 @@ public sealed partial class MainWindow : Window
         try
         {
             using var tagFile = TagLib.File.Create(filePath);
+            var durationMs = TrackDurationHelper.ResolveDurationMs(filePath, tagFile.Properties.Duration);
             return new TrackInfo
             {
                 Id = -1,
@@ -3986,7 +4015,7 @@ public sealed partial class MainWindow : Window
                     : tagFile.Tag.Title.Trim(),
                 Artist = tagFile.Tag.FirstPerformer?.Trim() ?? "",
                 Album = tagFile.Tag.Album?.Trim() ?? "",
-                DurationMs = (int)tagFile.Properties.Duration.TotalMilliseconds,
+                DurationMs = durationMs,
                 TrackNumber = (int)tagFile.Tag.Track,
                 Year = (int)tagFile.Tag.Year,
                 Genre = tagFile.Tag.FirstGenre ?? ""
@@ -5278,6 +5307,30 @@ public sealed partial class MainWindow : Window
         if (ts.TotalHours >= 1)
             return $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}";
         return $"{(int)ts.TotalMinutes}:{ts.Seconds:D2}";
+    }
+
+    private void RestoreQueuePreview()
+    {
+        if (_queue.CurrentTrack == null) return;
+
+        var track = _queue.CurrentTrack;
+        TrackTitle.Text = track.Title;
+        TrackArtist.Text = track.Artist;
+        TrackAlbum.Text = track.Album;
+        LoadAlbumArt(track.Path);
+        UpdateMiniPlayer(track);
+
+        if (track.DurationMs <= 0) return;
+
+        var duration = TimeSpan.FromMilliseconds(track.DurationMs);
+        var position = TimeSpan.FromSeconds(_queue.SavedPositionSeconds);
+        _isSeeking = true;
+        TimelineSlider.IsEnabled = true;
+        TimelineSlider.Maximum = duration.TotalSeconds;
+        TimelineSlider.Value = Math.Min(position.TotalSeconds, duration.TotalSeconds);
+        DurationText.Text = TrackDurationHelper.FormatDuration(duration);
+        PositionText.Text = FormatTime(position);
+        _isSeeking = false;
     }
 
     // -- Sleep Timer ------------------------------------------------
