@@ -1,6 +1,7 @@
 # Build outputs
 bin/
 obj/
+publish/
 
 # Installer output
 Installer/

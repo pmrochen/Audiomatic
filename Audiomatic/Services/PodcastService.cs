@@ -76,6 +76,37 @@ public static class PodcastService
         return episodes;
     }
 
+    // -- Episode progress tracking --
+
+    private static readonly string ProgressPath =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Audiomatic", "podcast_progress.json");
+
+    /// <summary>Load saved progress (audioUrl → position in seconds).</summary>
+    public static Dictionary<string, double> LoadProgress()
+    {
+        try
+        {
+            if (File.Exists(ProgressPath))
+            {
+                var json = File.ReadAllText(ProgressPath);
+                return JsonSerializer.Deserialize<Dictionary<string, double>>(json, JsonOpts) ?? [];
+            }
+        }
+        catch { }
+        return [];
+    }
+
+    public static void SaveProgress(Dictionary<string, double> progress)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ProgressPath)!);
+            var json = JsonSerializer.Serialize(progress, JsonOpts);
+            File.WriteAllText(ProgressPath, json);
+        }
+        catch { }
+    }
+
     // -- Read/unread episode tracking --
 
     private static readonly string ReadPath =
@@ -105,6 +136,99 @@ public static class PodcastService
             File.WriteAllText(ReadPath, json);
         }
         catch { }
+    }
+
+    // -- Episode downloads --
+
+    private static readonly string DownloadsDir =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Audiomatic", "podcasts");
+
+    /// <summary>
+    /// Deterministic local file path for a given episode audio URL.
+    /// </summary>
+    /// <summary>
+    /// Supported download extensions — formats NAudio can play natively.
+    /// </summary>
+    private static readonly HashSet<string> SupportedDownloadExtensions =
+        new(StringComparer.OrdinalIgnoreCase) { ".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".aiff" };
+
+    public static string GetDownloadPath(string audioUrl)
+    {
+        // Use a hash of the URL to avoid filesystem issues with long/special-char URLs
+        var hash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(audioUrl)))[..24];
+        // Keep original extension only if NAudio supports it, otherwise default to .mp3
+        var ext = Path.GetExtension(new Uri(audioUrl).AbsolutePath);
+        if (string.IsNullOrEmpty(ext) || !SupportedDownloadExtensions.Contains(ext))
+            ext = ".mp3";
+        return Path.Combine(DownloadsDir, hash + ext);
+    }
+
+    public static bool IsDownloaded(string audioUrl)
+    {
+        var path = GetDownloadPath(audioUrl);
+        return File.Exists(path);
+    }
+
+    public static async Task DownloadEpisodeAsync(string audioUrl,
+        IProgress<double>? progress = null, CancellationToken ct = default)
+    {
+        Directory.CreateDirectory(DownloadsDir);
+        var destPath = GetDownloadPath(audioUrl);
+
+        // If already downloaded, skip
+        if (File.Exists(destPath)) return;
+
+        var tmpPath = destPath + ".tmp";
+
+        try
+        {
+            using var response = await Http.GetAsync(audioUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+            response.EnsureSuccessStatusCode();
+
+            var totalBytes = response.Content.Headers.ContentLength ?? -1;
+            long downloaded = 0;
+
+            // Explicit using blocks so streams are closed before File.Move
+            using (var contentStream = await response.Content.ReadAsStreamAsync(ct))
+            using (var fileStream = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
+            {
+                var buffer = new byte[81920];
+                int bytesRead;
+                while ((bytesRead = await contentStream.ReadAsync(buffer, ct)) > 0)
+                {
+                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+                    downloaded += bytesRead;
+                    if (totalBytes > 0)
+                        progress?.Report((double)downloaded / totalBytes);
+                }
+            }
+            // Streams are now closed — safe to rename
+            File.Move(tmpPath, destPath, overwrite: true);
+            progress?.Report(1.0);
+        }
+        catch
+        {
+            // Clean up partial .tmp file on any failure
+            try { if (File.Exists(tmpPath)) File.Delete(tmpPath); } catch { }
+            throw;
+        }
+    }
+
+    public static void DeleteDownload(string audioUrl)
+    {
+        var path = GetDownloadPath(audioUrl);
+        try { if (File.Exists(path)) File.Delete(path); } catch { }
+    }
+
+    public static long GetDownloadsSizeBytes()
+    {
+        if (!Directory.Exists(DownloadsDir)) return 0;
+        return new DirectoryInfo(DownloadsDir)
+            .EnumerateFiles()
+            .Where(f => !f.Name.EndsWith(".tmp"))
+            .Sum(f => f.Length);
     }
 
     /// <summary>

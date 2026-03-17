@@ -16,6 +16,7 @@ public sealed class TrackInfo
     public long LastModified { get; set; }
     public long CreatedAt { get; set; }
     public bool IsFavorite { get; set; }
+    public int Bpm { get; set; }
 
     public string DurationFormatted
     {

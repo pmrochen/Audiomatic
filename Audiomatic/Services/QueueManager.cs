@@ -190,6 +190,20 @@ public sealed class QueueManager
         return track;
     }
 
+    /// <summary>
+    /// Returns the next track that would play without advancing the index.
+    /// </summary>
+    public TrackInfo? PeekNext()
+    {
+        if (_playQueue.Count == 0) return null;
+        return _repeat switch
+        {
+            RepeatMode.One => CurrentTrack,
+            RepeatMode.All => _playQueue[(_currentIndex + 1) % _playQueue.Count],
+            _ => _currentIndex < _playQueue.Count - 1 ? _playQueue[_currentIndex + 1] : null
+        };
+    }
+
     public bool HasNext()
     {
         if (_repeat == RepeatMode.All || _repeat == RepeatMode.One) return _playQueue.Count > 0;

@@ -88,6 +88,22 @@ public static class LibraryManager
             CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album);
             """;
         cmd.ExecuteNonQuery();
+
+        // Migration: add bpm column if missing
+        using var colCheck = conn.CreateCommand();
+        colCheck.CommandText = "PRAGMA table_info(tracks);";
+        bool hasBpm = false;
+        using (var reader = colCheck.ExecuteReader())
+        {
+            while (reader.Read())
+                if (reader.GetString(1) == "bpm") hasBpm = true;
+        }
+        if (!hasBpm)
+        {
+            using var alter = conn.CreateCommand();
+            alter.CommandText = "ALTER TABLE tracks ADD COLUMN bpm INTEGER NOT NULL DEFAULT 0;";
+            alter.ExecuteNonQuery();
+        }
     }
 
     // ── Folder management ────────────────────────────────────
@@ -237,6 +253,7 @@ public static class LibraryManager
             TrackNumber = (int)tagFile.Tag.Track,
             Year = (int)tagFile.Tag.Year,
             Genre = tagFile.Tag.FirstGenre ?? "",
+            Bpm = (int)tagFile.Tag.BeatsPerMinute,
             FolderId = folderId,
             Hash = ComputeFileHash(filePath),
             LastModified = new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeSeconds(),
@@ -250,8 +267,8 @@ public static class LibraryManager
         cmd.Transaction = transaction;
         cmd.CommandText = """
             INSERT OR REPLACE INTO tracks
-            (path, title, artist, album, duration_ms, track_number, year, genre, folder_id, hash, last_modified, created_at)
-            VALUES (@path, @title, @artist, @album, @dur, @tn, @year, @genre, @fid, @hash, @lm, @ca);
+            (path, title, artist, album, duration_ms, track_number, year, genre, bpm, folder_id, hash, last_modified, created_at)
+            VALUES (@path, @title, @artist, @album, @dur, @tn, @year, @genre, @bpm, @fid, @hash, @lm, @ca);
             """;
         cmd.Parameters.AddWithValue("@path", t.Path);
         cmd.Parameters.AddWithValue("@title", t.Title);
@@ -261,6 +278,7 @@ public static class LibraryManager
         cmd.Parameters.AddWithValue("@tn", t.TrackNumber);
         cmd.Parameters.AddWithValue("@year", t.Year);
         cmd.Parameters.AddWithValue("@genre", t.Genre);
+        cmd.Parameters.AddWithValue("@bpm", t.Bpm);
         cmd.Parameters.AddWithValue("@fid", t.FolderId);
         cmd.Parameters.AddWithValue("@hash", t.Hash);
         cmd.Parameters.AddWithValue("@lm", t.LastModified);
@@ -288,7 +306,7 @@ public static class LibraryManager
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT t.id, t.path, t.title, t.artist, t.album, t.duration_ms,
-                   t.track_number, t.year, t.genre, t.folder_id, t.hash, t.last_modified, t.created_at,
+                   t.track_number, t.year, t.genre, t.bpm, t.folder_id, t.hash, t.last_modified, t.created_at,
                    CASE WHEN f.track_id IS NOT NULL THEN 1 ELSE 0 END as is_fav
             FROM tracks t
             LEFT JOIN favorites f ON f.track_id = t.id
@@ -308,7 +326,7 @@ public static class LibraryManager
         var q = $"%{query.Trim()}%";
         cmd.CommandText = """
             SELECT t.id, t.path, t.title, t.artist, t.album, t.duration_ms,
-                   t.track_number, t.year, t.genre, t.folder_id, t.hash, t.last_modified, t.created_at,
+                   t.track_number, t.year, t.genre, t.bpm, t.folder_id, t.hash, t.last_modified, t.created_at,
                    CASE WHEN f.track_id IS NOT NULL THEN 1 ELSE 0 END as is_fav
             FROM tracks t
             LEFT JOIN favorites f ON f.track_id = t.id
@@ -346,11 +364,12 @@ public static class LibraryManager
                 TrackNumber = reader.GetInt32(6),
                 Year = reader.GetInt32(7),
                 Genre = reader.GetString(8),
-                FolderId = reader.GetInt64(9),
-                Hash = reader.GetString(10),
-                LastModified = reader.GetInt64(11),
-                CreatedAt = reader.GetInt64(12),
-                IsFavorite = reader.GetInt64(13) == 1
+                Bpm = reader.GetInt32(9),
+                FolderId = reader.GetInt64(10),
+                Hash = reader.GetString(11),
+                LastModified = reader.GetInt64(12),
+                CreatedAt = reader.GetInt64(13),
+                IsFavorite = reader.GetInt64(14) == 1
             });
         }
         return tracks;
@@ -381,7 +400,7 @@ public static class LibraryManager
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT t.id, t.path, t.title, t.artist, t.album, t.duration_ms,
-                   t.track_number, t.year, t.genre, t.folder_id, t.hash, t.last_modified, t.created_at,
+                   t.track_number, t.year, t.genre, t.bpm, t.folder_id, t.hash, t.last_modified, t.created_at,
                    1 as is_fav
             FROM tracks t
             INNER JOIN favorites f ON f.track_id = t.id
@@ -402,6 +421,18 @@ public static class LibraryManager
         cmd.Parameters.AddWithValue("@title", title);
         cmd.Parameters.AddWithValue("@artist", artist);
         cmd.Parameters.AddWithValue("@album", album);
+        cmd.Parameters.AddWithValue("@id", trackId);
+        cmd.ExecuteNonQuery();
+    }
+
+    public static void UpdateTrackBpm(long trackId, int bpm)
+    {
+        using var conn = new SqliteConnection(ConnectionString);
+        conn.Open();
+        EnablePragmas(conn);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE tracks SET bpm = @bpm WHERE id = @id;";
+        cmd.Parameters.AddWithValue("@bpm", bpm);
         cmd.Parameters.AddWithValue("@id", trackId);
         cmd.ExecuteNonQuery();
     }
@@ -499,7 +530,7 @@ public static class LibraryManager
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT t.id, t.path, t.title, t.artist, t.album, t.duration_ms,
-                   t.track_number, t.year, t.genre, t.folder_id, t.hash, t.last_modified, t.created_at,
+                   t.track_number, t.year, t.genre, t.bpm, t.folder_id, t.hash, t.last_modified, t.created_at,
                    CASE WHEN f.track_id IS NOT NULL THEN 1 ELSE 0 END as is_fav
             FROM tracks t
             INNER JOIN playlist_tracks pt ON pt.track_id = t.id
