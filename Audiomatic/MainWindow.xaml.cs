@@ -4186,27 +4186,127 @@ public sealed partial class MainWindow : Window
 
     private void ShowSettingsFlyout(FrameworkElement anchor)
     {
-        var currentBackdrop = SettingsManager.LoadBackdrop().Type;
         var flyout = new Flyout();
-        flyout.FlyoutPresenterStyle = ActionPanel.CreateFlyoutPresenterStyle();
+        flyout.FlyoutPresenterStyle = ActionPanel.CreateFlyoutPresenterStyle(260, 320);
 
         var panel = new StackPanel { Spacing = 0 };
+        var allButtons = new List<Button>();
 
-        // Header
-        panel.Children.Add(ActionPanel.CreateSectionHeader(Strings.T("Actions")));
+        static string FindLabel((string key, string label)[] items, string current)
+        {
+            foreach (var (k, l) in items) if (k == current) return l;
+            return "";
+        }
+
+        // ── Appearance cascades ──────────────────────────────────
+
+        // Theme
+        var currentTheme = SettingsManager.LoadTheme();
+        var themes = new[] { ("system", Strings.T("System")), ("light", Strings.T("Light")), ("dark", Strings.T("Dark")) };
+        var themeBtn = ActionPanel.CreateCascadeButton(Strings.T("Theme"), FindLabel(themes, currentTheme),
+            ActionPanel.CreateRadioSubMenu(themes, currentTheme, k => { SettingsManager.SaveTheme(k); ApplyTheme(k); flyout.Hide(); }));
+        allButtons.Add(themeBtn);
+        panel.Children.Add(themeBtn);
+
+        // Backdrop
+        var currentBackdrop = SettingsManager.LoadBackdrop().Type;
+        var backdrops = new[] { ("acrylic", Strings.T("Acrylic")), ("acrylic_custom", Strings.T("Custom Acrylic")), ("mica", Strings.T("Mica")), ("mica_alt", Strings.T("Mica Alt")), ("none", Strings.T("None")) };
+        var backdropSubMenu = CreateBackdropSubMenu(backdrops, currentBackdrop, flyout, anchor);
+        var backdropBtn = ActionPanel.CreateCascadeButton(Strings.T("Backdrop"), FindLabel(backdrops, currentBackdrop), backdropSubMenu);
+        backdropBtn.Tag = Strings.T("Backdrop") + " Acrylic Mica";
+        allButtons.Add(backdropBtn);
+        panel.Children.Add(backdropBtn);
+
+        // Accent Color — navigate to color picker sub-panel
+        var accentBtn = ActionPanel.CreateNavigateButton(Strings.T("Accent Color"), () =>
+        {
+            ShowAccentColorPanel(flyout, anchor);
+        });
+        accentBtn.Tag = Strings.T("Accent Color") + " Color Couleur";
+        allButtons.Add(accentBtn);
+        panel.Children.Add(accentBtn);
+
+        // Visualizer FPS
+        var fpsOptions = new[] { ("30", Strings.T("30 FPS")), ("60", Strings.T("60 FPS")) };
+        var vizBtn = ActionPanel.CreateCascadeButton(Strings.T("Visualizer"), _vizFps + " FPS",
+            ActionPanel.CreateRadioSubMenu(fpsOptions, _vizFps.ToString(), k =>
+            {
+                var fps = int.Parse(k);
+                ApplyVisualizerFps(fps);
+                var s = SettingsManager.Load();
+                SettingsManager.Save(s with { VisualizerFps = fps });
+                flyout.Hide();
+            }));
+        vizBtn.Tag = Strings.T("Visualizer") + " FPS";
+        allButtons.Add(vizBtn);
+        panel.Children.Add(vizBtn);
+
         panel.Children.Add(ActionPanel.CreateSeparator());
 
-        // Library actions
+        // ── Language cascade ─────────────────────────────────────
+        var currentLang = SettingsManager.LoadLanguage();
+        var langs = new[] { ("en", Strings.T("English")), ("fr", Strings.T("French")) };
+        var langBtn = ActionPanel.CreateCascadeButton(Strings.T("Language"), FindLabel(langs, currentLang),
+            ActionPanel.CreateRadioSubMenu(langs, currentLang, k => { SettingsManager.SaveLanguage(k); flyout.Hide(); ApplyLocalization(); }));
+        allButtons.Add(langBtn);
+        panel.Children.Add(langBtn);
+
+        panel.Children.Add(ActionPanel.CreateSeparator());
+
+        // ── Actions ──────────────────────────────────────────────
         panel.Children.Add(ActionPanel.CreateButton("\uE838", Strings.T("Add Folder"), [], () =>
         {
             flyout.Hide();
             ChooseFolder_Click(this, new RoutedEventArgs());
         }));
+        allButtons.Add((Button)panel.Children[^1]);
+
         panel.Children.Add(ActionPanel.CreateButton("\uE72C", Strings.T("Scan Library"), [], () =>
         {
             flyout.Hide();
             ScanAllFoldersAsync();
         }));
+        allButtons.Add((Button)panel.Children[^1]);
+
+        panel.Children.Add(ActionPanel.CreateSeparator());
+
+        // ── Window ───────────────────────────────────────────────
+        panel.Children.Add(ActionPanel.CreateButton("\uE73F",
+            _collapseState == CollapseState.Expanded ? Strings.T("Compact Mode") :
+            _collapseState == CollapseState.Compact ? Strings.T("Mini Player") : Strings.T("Expand"),
+            ["Ctrl", "L"], () =>
+        {
+            flyout.Hide();
+            ToggleCollapse();
+        }));
+        allButtons.Add((Button)panel.Children[^1]);
+
+        panel.Children.Add(ActionPanel.CreateButton(
+            _isPinnedOnTop ? "\uE842" : "\uE840",
+            _isPinnedOnTop ? Strings.T("Unpin from Top") : Strings.T("Pin on Top"),
+            [], () =>
+        {
+            flyout.Hide();
+            Pin_Click(this, new RoutedEventArgs());
+        }));
+        allButtons.Add((Button)panel.Children[^1]);
+
+        // Sleep timer — navigate to sub-panel
+        {
+            var sleepLabel = IsSleepTimerActive
+                ? Strings.T("Sleep ({0} min)", (int)SleepTimeRemaining.TotalMinutes)
+                : Strings.T("Sleep Timer");
+            var sleepBtn = ActionPanel.CreateNavigateButton(sleepLabel, () =>
+            {
+                ShowSleepTimerPanel(flyout, anchor);
+            });
+            allButtons.Add(sleepBtn);
+            panel.Children.Add(sleepBtn);
+        }
+
+        panel.Children.Add(ActionPanel.CreateSeparator());
+
+        // ── Destructive ──────────────────────────────────────────
         panel.Children.Add(ActionPanel.CreateButton("\uE74D", Strings.T("Reset Library"), [], () =>
         {
             flyout.Hide();
@@ -4221,163 +4321,86 @@ public sealed partial class MainWindow : Window
             UpdateNavigation();
             ApplyFilterAndSort();
         }, isDestructive: true));
-        panel.Children.Add(ActionPanel.CreateSeparator());
+        allButtons.Add((Button)panel.Children[^1]);
 
-        // Backdrop section
-        panel.Children.Add(ActionPanel.CreateSectionHeader(Strings.T("Backdrop")));
-
-        void AddBackdropOption(string type, string label)
-        {
-            var isActive = currentBackdrop == type;
-            panel.Children.Add(ActionPanel.CreateButton(
-                isActive ? "\uE73E" : "\uE8D7", label, [], () =>
-            {
-                var bd = new BackdropSettings(Type: type);
-                SettingsManager.SaveBackdrop(bd);
-                ApplyBackdrop(bd);
-                flyout.Hide();
-            }, isActive: isActive));
-        }
-
-        AddBackdropOption("acrylic", Strings.T("Acrylic"));
-
-        // Custom acrylic — replaces flyout content with sliders
-        {
-            var isActive = currentBackdrop == "acrylic_custom";
-            panel.Children.Add(ActionPanel.CreateButton(
-                isActive ? "\uE73E" : "\uE8D7", Strings.T("Custom Acrylic"), [], () =>
-            {
-                var bd = SettingsManager.LoadBackdrop();
-                if (bd.Type != "acrylic_custom")
-                    bd = bd with { Type = "acrylic_custom" };
-                SettingsManager.SaveBackdrop(bd);
-                ApplyBackdrop(bd);
-                ShowAcrylicSettingsInFlyout(flyout, anchor);
-            }, isActive: isActive));
-        }
-
-        AddBackdropOption("mica", Strings.T("Mica"));
-        AddBackdropOption("mica_alt", Strings.T("Mica Alt"));
-        AddBackdropOption("none", Strings.T("None"));
-
-        panel.Children.Add(ActionPanel.CreateSeparator());
-
-        // Theme section
-        var currentTheme = SettingsManager.LoadTheme();
-        panel.Children.Add(ActionPanel.CreateSectionHeader(Strings.T("Theme")));
-
-        void AddThemeOption(string theme, string label)
-        {
-            var isActive = currentTheme == theme;
-            panel.Children.Add(ActionPanel.CreateButton(
-                isActive ? "\uE73E" : "\uE8D7", label, [], () =>
-            {
-                SettingsManager.SaveTheme(theme);
-                ApplyTheme(theme);
-                flyout.Hide();
-            }, isActive: isActive));
-        }
-
-        AddThemeOption("system", Strings.T("System"));
-        AddThemeOption("light", Strings.T("Light"));
-        AddThemeOption("dark", Strings.T("Dark"));
-
-        panel.Children.Add(ActionPanel.CreateSeparator());
-
-        // Accent color section
-        panel.Children.Add(ActionPanel.CreateSectionHeader(Strings.T("Accent Color")));
-        panel.Children.Add(ActionPanel.CreateButton("\uE790", Strings.T("Choose Accent..."), [], () =>
-        {
-            flyout.Hide();
-            ShowAccentColorFlyout(anchor);
-        }));
-
-        panel.Children.Add(ActionPanel.CreateSeparator());
-
-        // Visualizer FPS
-        panel.Children.Add(ActionPanel.CreateSectionHeader(Strings.T("Visualizer")));
-
-        void AddFpsOption(int fps, string label)
-        {
-            var isActive = _vizFps == fps;
-            panel.Children.Add(ActionPanel.CreateButton(
-                isActive ? "\uE73E" : "\uE8D7", label, [], () =>
-            {
-                ApplyVisualizerFps(fps);
-                var s = SettingsManager.Load();
-                SettingsManager.Save(s with { VisualizerFps = fps });
-                flyout.Hide();
-            }, isActive: isActive));
-        }
-
-        AddFpsOption(30, Strings.T("30 FPS"));
-        AddFpsOption(60, Strings.T("60 FPS"));
-
-        panel.Children.Add(ActionPanel.CreateSeparator());
-
-        // Toggle actions
-        panel.Children.Add(ActionPanel.CreateButton("\uE73F",
-            _collapseState == CollapseState.Expanded ? Strings.T("Compact Mode") :
-            _collapseState == CollapseState.Compact ? Strings.T("Mini Player") : Strings.T("Expand"),
-            ["Ctrl", "L"], () =>
-        {
-            flyout.Hide();
-            ToggleCollapse();
-        }));
-
-        panel.Children.Add(ActionPanel.CreateButton(
-            _isPinnedOnTop ? "\uE842" : "\uE840",
-            _isPinnedOnTop ? Strings.T("Unpin from Top") : Strings.T("Pin on Top"),
-            [], () =>
-        {
-            flyout.Hide();
-            Pin_Click(this, new RoutedEventArgs());
-        }));
-
-        // Sleep timer
-        {
-            var sleepLabel = IsSleepTimerActive
-                ? Strings.T("Sleep ({0} min)", (int)SleepTimeRemaining.TotalMinutes)
-                : Strings.T("Sleep Timer");
-            panel.Children.Add(ActionPanel.CreateButton("\uE823", sleepLabel, [], () =>
-            {
-                ShowSleepTimerFlyout(flyout, anchor);
-            }, isActive: IsSleepTimerActive));
-        }
-
-        panel.Children.Add(ActionPanel.CreateSeparator());
-
-        // Language section
-        var currentLang = SettingsManager.LoadLanguage();
-        panel.Children.Add(ActionPanel.CreateSectionHeader(Strings.T("Language")));
-
-        void AddLanguageOption(string code, string label)
-        {
-            var isActive = currentLang == code;
-            panel.Children.Add(ActionPanel.CreateButton(
-                isActive ? "\uE73E" : "\uE8D7", label, [], () =>
-            {
-                SettingsManager.SaveLanguage(code);
-                flyout.Hide();
-                ApplyLocalization();
-            }, isActive: isActive));
-        }
-
-        AddLanguageOption("en", Strings.T("English"));
-        AddLanguageOption("fr", Strings.T("French"));
-
-        panel.Children.Add(ActionPanel.CreateSeparator());
-
-        // Quit
         panel.Children.Add(ActionPanel.CreateButton("\uE711", Strings.T("Quit"), [], () =>
         {
             flyout.Hide();
             _isQuitting = true;
             Close();
         }, isDestructive: true));
+        allButtons.Add((Button)panel.Children[^1]);
+
+        // ── Search ───────────────────────────────────────────────
+        panel.Children.Add(ActionPanel.CreateSeparator());
+        var searchBox = new TextBox
+        {
+            PlaceholderText = Strings.T("Search"),
+            FontSize = 12,
+            BorderThickness = new Thickness(0),
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Padding = new Thickness(8, 6, 8, 6),
+            Margin = new Thickness(2)
+        };
+        searchBox.TextChanged += (_, _) =>
+        {
+            var query = searchBox.Text;
+            foreach (var btn in allButtons)
+            {
+                var tag = btn.Tag as string ?? "";
+                btn.Visibility = string.IsNullOrEmpty(query) ||
+                    tag.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+        };
+        panel.Children.Add(searchBox);
 
         flyout.Content = panel;
         flyout.ShowAt(anchor);
+    }
+
+    private Flyout CreateBackdropSubMenu(
+        (string key, string label)[] options, string currentKey,
+        Flyout parentFlyout, FrameworkElement anchor)
+    {
+        var flyout = new Flyout
+        {
+            Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.RightEdgeAlignedTop,
+            FlyoutPresenterStyle = ActionPanel.CreateFlyoutPresenterStyle(180, 260)
+        };
+
+        var panel = new StackPanel { Spacing = 0 };
+        foreach (var (key, label) in options)
+        {
+            var k = key;
+            if (k == "acrylic_custom")
+            {
+                // Custom acrylic navigates to sliders panel
+                panel.Children.Add(ActionPanel.CreateCheckItem(label, currentKey == k, () =>
+                {
+                    var bd = SettingsManager.LoadBackdrop();
+                    if (bd.Type != "acrylic_custom")
+                        bd = bd with { Type = "acrylic_custom" };
+                    SettingsManager.SaveBackdrop(bd);
+                    ApplyBackdrop(bd);
+                    flyout.Hide();
+                    ShowAcrylicSettingsInFlyout(parentFlyout, anchor);
+                }));
+            }
+            else
+            {
+                panel.Children.Add(ActionPanel.CreateCheckItem(label, currentKey == k, () =>
+                {
+                    var bd = new BackdropSettings(Type: k);
+                    SettingsManager.SaveBackdrop(bd);
+                    ApplyBackdrop(bd);
+                    parentFlyout.Hide();
+                }));
+            }
+        }
+        flyout.Content = panel;
+        return flyout;
     }
 
     private void OpenLibraryWindow()
@@ -4547,15 +4570,12 @@ public sealed partial class MainWindow : Window
         var suppressChanges = true;
         var currentKind = settings.Kind;
 
-        var panel = new StackPanel { Spacing = 0, Width = 260 };
-
-        // Back button
-        panel.Children.Add(ActionPanel.CreateButton("\uE72B", Strings.T("Backdrop"), [], () =>
+        var panel = ActionPanel.CreateSubPanelWithHeader(Strings.T("Custom Acrylic"), () =>
         {
             flyout.Hide();
             ShowSettingsFlyout(anchor);
-        }));
-        panel.Children.Add(ActionPanel.CreateSeparator());
+        });
+        panel.Width = 260;
 
         // Tint Opacity
         var tintOpacityValue = new TextBlock
@@ -4819,42 +4839,13 @@ public sealed partial class MainWindow : Window
         flyout.Content = panel;
     }
 
-    private void ShowAccentColorFlyout(FrameworkElement anchor)
+    private void ShowAccentColorPanel(Flyout flyout, FrameworkElement anchor)
     {
-        var flyout = new Flyout();
-        flyout.FlyoutPresenterStyle = ActionPanel.CreateFlyoutPresenterStyle(minWidth: 280, maxWidth: 320);
-
-        var panel = new StackPanel { Spacing = 8 };
-
-        // Header
-        var headerGrid = new Grid();
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var backBtn = new Button
-        {
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-            BorderThickness = new Thickness(0),
-            Padding = new Thickness(4),
-            Content = new FontIcon { Glyph = "\uE72B", FontSize = 12 }
-        };
-        backBtn.Click += (_, _) =>
+        var panel = ActionPanel.CreateSubPanelWithHeader(Strings.T("Accent Color"), () =>
         {
             flyout.Hide();
             ShowSettingsFlyout(anchor);
-        };
-        Grid.SetColumn(backBtn, 0);
-        var titleText = new TextBlock
-        {
-            Text = "Accent Color",
-            FontSize = 13,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(8, 0, 0, 0)
-        };
-        Grid.SetColumn(titleText, 1);
-        headerGrid.Children.Add(backBtn);
-        headerGrid.Children.Add(titleText);
-        panel.Children.Add(headerGrid);
+        });
 
         var currentAccent = SettingsManager.Load().AccentColor;
 
@@ -4997,7 +4988,6 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(customGrid);
 
         flyout.Content = panel;
-        flyout.ShowAt(anchor);
     }
 
     private void ApplyAccentAndSave(string hexColor)
@@ -5588,16 +5578,13 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ShowSleepTimerFlyout(Flyout parentFlyout, FrameworkElement anchor)
+    private void ShowSleepTimerPanel(Flyout flyout, FrameworkElement anchor)
     {
-        parentFlyout.Hide();
-
-        var flyout = new Flyout();
-        flyout.FlyoutPresenterStyle = ActionPanel.CreateFlyoutPresenterStyle(minWidth: 180, maxWidth: 220);
-
-        var panel = new StackPanel { Spacing = 0 };
-        panel.Children.Add(ActionPanel.CreateSectionHeader(Strings.T("Sleep Timer")));
-        panel.Children.Add(ActionPanel.CreateSeparator());
+        var panel = ActionPanel.CreateSubPanelWithHeader(Strings.T("Sleep Timer"), () =>
+        {
+            flyout.Hide();
+            ShowSettingsFlyout(anchor);
+        });
 
         if (IsSleepTimerActive)
         {
@@ -5629,6 +5616,5 @@ public sealed partial class MainWindow : Window
         }
 
         flyout.Content = panel;
-        flyout.ShowAt(anchor);
     }
 }
