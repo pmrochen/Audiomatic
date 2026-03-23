@@ -380,18 +380,7 @@ public sealed class AudioPlayerService : IDisposable
             await tcs.Task;
 
             IsPlaying = true;
-
-            var smtc = _mediaPlayer.SystemMediaTransportControls;
-            smtc.IsEnabled = true;
-            smtc.IsPlayEnabled = true;
-            smtc.IsPauseEnabled = true;
-            smtc.PlaybackStatus = MediaPlaybackStatus.Playing;
-
-            var updater = smtc.DisplayUpdater;
-            updater.Type = MediaPlaybackType.Music;
-            updater.MusicProperties.Title = "Radio Stream";
-            updater.MusicProperties.Artist = streamUri.Host;
-            updater.Update();
+            UpdateSmtc(streamUri);
 
             _dispatcherQueue?.TryEnqueue(() =>
             {
@@ -518,11 +507,30 @@ public sealed class AudioPlayerService : IDisposable
         catch { }
     }
 
-    /// <summary>
-    /// Sets SMTC thumbnail from artwork data already read by the caller.
-    /// Avoids a duplicate TagLib read.
-    /// </summary>
-    public void UpdateSmtcArtwork(byte[]? embeddedArtData, string? coverFilePath)
+	private void UpdateSmtc(Uri streamUri)
+	{
+		try
+		{
+			var smtc = _mediaPlayer.SystemMediaTransportControls;
+			smtc.IsEnabled = true;
+			smtc.IsPlayEnabled = true;
+			smtc.IsPauseEnabled = true;
+			smtc.PlaybackStatus = MediaPlaybackStatus.Playing;
+
+			var updater = smtc.DisplayUpdater;
+			updater.Type = MediaPlaybackType.Music;
+			updater.MusicProperties.Title = "Radio Stream"; // #TODO Retrieve current title/artist from the stream
+			updater.MusicProperties.Artist = streamUri.Host;
+			updater.Update();
+		}
+		catch { }
+	}
+
+	/// <summary>
+	/// Sets SMTC thumbnail from artwork data already read by the caller.
+	/// Avoids a duplicate TagLib read.
+	/// </summary>
+	public void UpdateSmtcArtwork(byte[]? embeddedArtData, string? coverFilePath)
     {
         try
         {
