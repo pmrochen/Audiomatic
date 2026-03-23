@@ -1,5 +1,6 @@
-using Audiomatic.Models;
 using Audiomatic;
+using Audiomatic.Models;
+using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using Windows.Media;
 using Windows.Media.Core;
@@ -16,7 +17,8 @@ public sealed class AudioPlayerService : IDisposable
     private readonly MediaPlayer _mediaPlayer = new();
     private IWavePlayer? _waveOut;
     private AudioFileReader? _audioReader;
-    private bool _useNAudio;
+	private WaveStream? _waveStream;
+	private bool _useNAudio;
     private bool _isMuted;
     private double _volume = 1.0;
     private InMemoryRandomAccessStream? _albumArtStream;
@@ -64,8 +66,8 @@ public sealed class AudioPlayerService : IDisposable
     {
         get
         {
-            if (_useNAudio && _audioReader != null)
-                return _audioReader.CurrentTime;
+            if (_useNAudio && _waveStream != null)
+                return _waveStream.CurrentTime;
             return _mediaPlayer.PlaybackSession.Position;
         }
     }
@@ -74,7 +76,7 @@ public sealed class AudioPlayerService : IDisposable
         get
         {
             if (_useNAudio)
-                return _trueDuration > TimeSpan.Zero ? _trueDuration : (_audioReader?.TotalTime ?? TimeSpan.Zero);
+                return _trueDuration > TimeSpan.Zero ? _trueDuration : (_waveStream?.TotalTime ?? TimeSpan.Zero);
             return _mediaPlayer.NaturalDuration;
         }
     }
@@ -175,6 +177,7 @@ public sealed class AudioPlayerService : IDisposable
         try
         {
             _audioReader = new AudioFileReader(track.Path);
+            _waveStream = _audioReader;
             _trueDuration = TrackDurationHelper.ResolveDuration(track.Path, _audioReader.TotalTime);
 
             _equalizer = new Equalizer(_audioReader);
@@ -277,6 +280,7 @@ public sealed class AudioPlayerService : IDisposable
 
         // Promote next chain to current
         _audioReader = _nextAudioReader;
+        _waveStream = _audioReader;
         _equalizer = _nextEqualizer;
         _speedProvider = _nextSpeedProvider;
         _trueDuration = _nextTrueDuration;
@@ -326,9 +330,9 @@ public sealed class AudioPlayerService : IDisposable
     {
         get
         {
-            if (!_useNAudio || _audioReader == null) return -1;
-            var total = _trueDuration > TimeSpan.Zero ? _trueDuration : _audioReader.TotalTime;
-            return (total - _audioReader.CurrentTime).TotalSeconds / _playbackSpeed;
+            if (!_useNAudio || _waveStream == null) return -1;
+            var total = _trueDuration > TimeSpan.Zero ? _trueDuration : _waveStream.TotalTime;
+            return (total - _waveStream.CurrentTime).TotalSeconds / _playbackSpeed;
         }
     }
 
@@ -338,11 +342,39 @@ public sealed class AudioPlayerService : IDisposable
     {
         Stop();
         IsStream = true;
-        _useNAudio = false;
         CurrentTrack = null;
 
-        try
-        {
+		try
+		{
+            if (true) // Can use NAudio for streaming?
+            {
+                // Use NAudio for stream playback
+                _useNAudio = true;
+
+				// MF decodes the stream
+				/*await*/ _waveStream = new MediaFoundationReader(streamUri.ToString());
+				_audioReader = null;
+
+                // #TODO Enable volume control
+
+				// NAudio renders via WASAPI
+				_waveOut = new WasapiOut(/*AudioClientShareMode.Exclusive, latency: 200*/); // #TODO Enable exclusive mode via option switch
+				_waveOut.Init(_waveStream);
+				_waveOut.Play();
+
+				IsPlaying = true;
+				UpdateSmtc(streamUri);
+
+				_dispatcherQueue?.TryEnqueue(() =>
+				{
+					PlaybackStarted?.Invoke();
+				});
+
+				return;
+            }
+            
+            _useNAudio = false;
+
             var source = MediaSource.CreateFromUri(streamUri);
             var item = new MediaPlaybackItem(source);
 
@@ -434,7 +466,8 @@ public sealed class AudioPlayerService : IDisposable
             _waveOut?.Stop();
             _waveOut?.Dispose();
             _waveOut = null;
-            _audioReader?.Dispose();
+			_waveStream?.Dispose();
+			_waveStream = null;
             _audioReader = null;
         }
         else
@@ -451,10 +484,10 @@ public sealed class AudioPlayerService : IDisposable
 
     public void Seek(TimeSpan position)
     {
-        if (_useNAudio && _audioReader != null)
+        if (_useNAudio && _waveStream != null)
         {
             _speedProvider?.Reset();
-            _audioReader.CurrentTime = position;
+			_waveStream.CurrentTime = position;
         }
         else
         {
