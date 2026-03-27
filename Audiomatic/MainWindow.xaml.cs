@@ -33,9 +33,13 @@ public sealed partial class MainWindow : Window
     private bool _sortAscending = true;
 
     // Playlist navigation
-    private enum ViewMode { Library, PlaylistList, PlaylistDetail, Queue, Radio, Podcast, PodcastEpisodes, Visualizer, Equalizer, MediaControl, Albums, AlbumDetail, Artists, ArtistDetail }
+    private enum ViewMode { Library, PlaylistList, PlaylistDetail, Queue, Radio, Podcast, PodcastEpisodes, Visualizer, Equalizer, MediaControl, Albums, AlbumDetail, Artists, ArtistDetail, Stats }
     private ViewMode _viewMode = ViewMode.Library;
     private PlaylistInfo? _currentPlaylist;
+
+    // Play history tracking
+    private long _playStartTrackId;
+    private DateTime _playStartTime;
 
     // Radio
     private List<RadioStation> _radioStations = [];
@@ -83,18 +87,40 @@ public sealed partial class MainWindow : Window
     private DispatcherTimer? _sleepTimer;
     private DateTime _sleepTargetTime;
 
-    // Custom acrylic
-    private DesktopAcrylicController? _acrylicController;
+    // Backdrop controller (always use controller API to keep effect when unfocused)
+    private IDisposable? _backdropController;
     private SystemBackdropConfiguration? _configSource;
 
     // Detached library window
     private LibraryWindow? _libraryWindow;
 
+    // Overlay widget
+    private OverlayWidget? _overlayWidget;
+
     // Folder watcher
     private LibraryWatcher? _libraryWatcher;
 
-    // Nav overflow
+    // Nav overflow & tab order (all 10 items)
     private readonly List<int> _overflowedTabIndices = [];
+    private int[] _tabOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    private int _dragTabIndex = -1;
+    private readonly Button[] _navButtons = new Button[11];
+    private readonly TextBlock[] _navTexts = new TextBlock[11];
+
+    private static readonly (string Icon, string LabelKey, ViewMode[] Modes)[] TabDefs =
+    [
+        ("\uE8F1", "Library",    [ViewMode.Library]),
+        ("\uE8FD", "Playlists",  [ViewMode.PlaylistList, ViewMode.PlaylistDetail]),
+        ("\uE890", "Queue",      [ViewMode.Queue]),
+        ("\uEC05", "Radio",      [ViewMode.Radio]),
+        ("\uE774", "Podcasts",   [ViewMode.Podcast, ViewMode.PodcastEpisodes]),
+        ("\uE93F", "Albums",     [ViewMode.Albums, ViewMode.AlbumDetail]),
+        ("\uE77B", "Artists",    [ViewMode.Artists, ViewMode.ArtistDetail]),
+        ("\uE9D9", "Visualizer", [ViewMode.Visualizer]),
+        ("\uE9E9", "Equalizer",  [ViewMode.Equalizer]),
+        ("\uE93C", "Media",      [ViewMode.MediaControl]),
+        ("\uE9D9", "Stats",      [ViewMode.Stats]),
+    ];
 
     // Collapse animation
     private enum CollapseState { Expanded, Compact, Mini }
@@ -238,6 +264,10 @@ public sealed partial class MainWindow : Window
         _readEpisodes = PodcastService.LoadReadEpisodes();
         _episodeProgress = PodcastService.LoadProgress();
 
+        // Load tab order and rebuild nav
+        _tabOrder = SettingsManager.LoadTabOrder();
+        RebuildNavTabs();
+
         // Initialize library and load tracks
         LibraryManager.Initialize();
         LoadTracks();
@@ -286,10 +316,12 @@ public sealed partial class MainWindow : Window
         {
             _isQuitting = true;
             AppWindow.Changed -= MainAppWindow_Changed;
+            CloseOverlayWidget();
             CloseLibraryWindow();
             UnregisterHotKey(_hwnd, HOTKEY_ID);
             UnregisterHotKey(_hwnd, HOTKEY_COLLAPSE_ID);
             RemoveTrayIcon();
+            RecordCurrentPlay(); // Save play history before exiting
             _queue.SavedPositionSeconds = _player.Position.TotalSeconds;
             _queue.SaveState();
             SavePodcastProgressNow();
@@ -639,6 +671,7 @@ public sealed partial class MainWindow : Window
         }
         else
         {
+            RecordCurrentPlay(); // Queue finished — record last track
             PlayPauseIcon.Glyph = "\uE768";
             MiniPlayPauseIcon.Glyph = "\uE768";
         }
@@ -700,8 +733,30 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void RecordCurrentPlay()
+    {
+        if (_playStartTrackId <= 0) return;
+        var elapsed = (int)(DateTime.UtcNow - _playStartTime).TotalMilliseconds;
+        if (elapsed < 10_000) return; // Ignore plays under 10 seconds
+        var trackId = _playStartTrackId;
+        _playStartTrackId = 0;
+        Task.Run(() =>
+        {
+            try { LibraryManager.RecordPlay(trackId, elapsed); } catch { }
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_viewMode == ViewMode.Stats)
+                    BuildStatsUI();
+            });
+        });
+    }
+
     private void UpdateNowPlaying(TrackInfo track)
     {
+        RecordCurrentPlay(); // Record previous track before switching
+        _playStartTrackId = track.Id;
+        _playStartTime = DateTime.UtcNow;
+
         SavePodcastProgressNow();
         _currentEpisode = null; // Clear podcast episode when playing a track
         TrackTitle.Text = track.Title;
@@ -1185,20 +1240,17 @@ public sealed partial class MainWindow : Window
             ? Visibility.Visible : Visibility.Collapsed;
 
         // Highlight active tabs
-        void SetTab(TextBlock tb, bool active)
+        for (int i = 0; i < TabDefs.Length; i++)
         {
-            tb.FontWeight = active
+            if (_navTexts[i] == null) continue;
+            bool active = TabDefs[i].Modes.Contains(_viewMode);
+            _navTexts[i].FontWeight = active
                 ? Microsoft.UI.Text.FontWeights.SemiBold
                 : Microsoft.UI.Text.FontWeights.Normal;
-            tb.Foreground = active
+            _navTexts[i].Foreground = active
                 ? ThemeHelper.Brush("AccentTextFillColorPrimaryBrush")
                 : ThemeHelper.Brush("TextFillColorPrimaryBrush");
         }
-        SetTab(NavLibraryText, _viewMode == ViewMode.Library);
-        SetTab(NavPlaylistsText, _viewMode == ViewMode.PlaylistList);
-        SetTab(NavQueueText, _viewMode == ViewMode.Queue);
-        SetTab(NavRadioText, _viewMode == ViewMode.Radio);
-        SetTab(NavPodcastText, _viewMode == ViewMode.Podcast || _viewMode == ViewMode.PodcastEpisodes);
         // NavMoreText highlighting is handled in UpdateNavOverflow() to account for overflowed tabs
 
         // Show/hide search & sort
@@ -1223,6 +1275,8 @@ public sealed partial class MainWindow : Window
         PodcastContainer.Visibility = isPodcast
             ? Visibility.Visible : Visibility.Collapsed;
         MediaContainer.Visibility = _viewMode == ViewMode.MediaControl
+            ? Visibility.Visible : Visibility.Collapsed;
+        StatsContainer.Visibility = _viewMode == ViewMode.Stats
             ? Visibility.Visible : Visibility.Collapsed;
 
         // Detail header names
@@ -1255,55 +1309,39 @@ public sealed partial class MainWindow : Window
             available -= ClearQueueBtn.DesiredSize.Width;
         }
 
-        var tabButtons = new[] { NavLibraryBtn, NavPlaylistsBtn, NavQueueBtn, NavRadioBtn, NavPodcastBtn };
-        var tabTexts = new[] { NavLibraryText.Text, NavPlaylistsText.Text, NavQueueText.Text, NavRadioText.Text, NavPodcastText.Text };
-
         // Measure the "..." button
         double moreWidth = MeasureNavButtonWidth("...") + NavTabs.Spacing;
 
         // Measure each tab
-        var widths = new double[tabButtons.Length];
-        for (int i = 0; i < tabButtons.Length; i++)
-            widths[i] = MeasureNavButtonWidth(tabTexts[i]) + NavTabs.Spacing;
+        var widths = new double[TabDefs.Length];
+        for (int i = 0; i < TabDefs.Length; i++)
+            widths[i] = MeasureNavButtonWidth(Strings.T(TabDefs[i].LabelKey)) + NavTabs.Spacing;
 
-        // Determine which tabs fit (always reserving space for "...")
+        // Determine which tabs fit in display order (always reserving space for "...")
         _overflowedTabIndices.Clear();
         double used = moreWidth;
 
-        for (int i = 0; i < tabButtons.Length; i++)
+        foreach (var idx in _tabOrder)
         {
-            if (used + widths[i] <= available)
+            if (_navButtons[idx] == null) continue;
+            if (used + widths[idx] <= available)
             {
-                tabButtons[i].Visibility = Visibility.Visible;
-                used += widths[i];
+                _navButtons[idx].Visibility = Visibility.Visible;
+                used += widths[idx];
             }
             else
             {
-                tabButtons[i].Visibility = Visibility.Collapsed;
-                _overflowedTabIndices.Add(i);
+                _navButtons[idx].Visibility = Visibility.Collapsed;
+                _overflowedTabIndices.Add(idx);
             }
         }
 
-        // Highlight "..." if an overflowed tab or a static more-menu view is active
-        var moreViewModes = new[] { ViewMode.Visualizer, ViewMode.Equalizer, ViewMode.MediaControl,
-            ViewMode.Albums, ViewMode.AlbumDetail, ViewMode.Artists, ViewMode.ArtistDetail };
-        var overflowViewModes = new Dictionary<int, ViewMode[]>
+        // Highlight "..." if any overflowed tab's view is active
+        bool moreActive = false;
+        foreach (var idx in _overflowedTabIndices)
         {
-            [0] = [ViewMode.Library],
-            [1] = [ViewMode.PlaylistList, ViewMode.PlaylistDetail],
-            [2] = [ViewMode.Queue],
-            [3] = [ViewMode.Radio],
-            [4] = [ViewMode.Podcast, ViewMode.PodcastEpisodes],
-        };
-
-        bool moreActive = moreViewModes.Contains(_viewMode);
-        if (!moreActive)
-        {
-            foreach (var idx in _overflowedTabIndices)
-            {
-                if (overflowViewModes.TryGetValue(idx, out var modes) && modes.Contains(_viewMode))
-                { moreActive = true; break; }
-            }
+            if (TabDefs[idx].Modes.Contains(_viewMode))
+            { moreActive = true; break; }
         }
 
         NavMoreText.FontWeight = moreActive
@@ -1321,6 +1359,118 @@ public sealed partial class MainWindow : Window
         return tb.DesiredSize.Width + 18; // Button Padding="8,4" → 16px horizontal + 2px chrome
     }
 
+    private void NavTabClick(int tabId)
+    {
+        // Route click to the correct navigation handler
+        var dummy = new RoutedEventArgs();
+        switch (tabId)
+        {
+            case 0: NavLibrary_Click(this, dummy); break;
+            case 1: NavPlaylists_Click(this, dummy); break;
+            case 2: NavQueue_Click(this, dummy); break;
+            case 3: NavRadio_Click(this, dummy); break;
+            case 4: NavPodcast_Click(this, dummy); break;
+            case 5: NavAlbums_Click(this, dummy); break;
+            case 6: NavArtists_Click(this, dummy); break;
+            case 7: NavVisualizer_Click(this, dummy); break;
+            case 8: NavEqualizer_Click(this, dummy); break;
+            case 9: NavMedia_Click(this, dummy); break;
+            case 10: NavStats_Click(this, dummy); break;
+        }
+    }
+
+    private void RebuildNavTabs()
+    {
+        // Create (or recreate) buttons for all tab definitions
+        for (int i = 0; i < TabDefs.Length; i++)
+        {
+            var def = TabDefs[i];
+            var textBlock = new TextBlock
+            {
+                Text = Strings.T(def.LabelKey),
+                FontSize = 12
+            };
+            _navTexts[i] = textBlock;
+
+            var btn = new Button
+            {
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(8, 4, 8, 4),
+                Content = textBlock,
+                Tag = i,
+                CanDrag = true,
+                AllowDrop = true
+            };
+            btn.DragStarting += NavTab_DragStarting;
+            btn.DragOver += NavTab_DragOver;
+            btn.Drop += NavTab_Drop;
+
+            var id = i;
+            btn.Click += (_, _) => NavTabClick(id);
+
+            _navButtons[i] = btn;
+        }
+
+        NavTabs.Children.Clear();
+        foreach (var idx in _tabOrder)
+            NavTabs.Children.Add(_navButtons[idx]);
+        NavTabs.Children.Add(NavMoreBtn); // always last
+    }
+
+    private void NavTab_DragStarting(UIElement sender, DragStartingEventArgs args)
+    {
+        if (sender is Button btn && btn.Tag is int id)
+            _dragTabIndex = id;
+        args.Data.RequestedOperation = DataPackageOperation.Move;
+    }
+
+    private void NavTab_DragOver(object sender, DragEventArgs e)
+    {
+        e.AcceptedOperation = DataPackageOperation.Move;
+    }
+
+    private void NavTab_Drop(object sender, DragEventArgs e)
+    {
+        if (_dragTabIndex < 0) return;
+
+        int targetTabIndex = -1;
+        if (sender is Button btn && btn.Tag is int id)
+            targetTabIndex = id;
+
+        if (targetTabIndex < 0 || targetTabIndex == _dragTabIndex)
+        {
+            _dragTabIndex = -1;
+            return;
+        }
+
+        int fromPos = Array.IndexOf(_tabOrder, _dragTabIndex);
+        int toPos = Array.IndexOf(_tabOrder, targetTabIndex);
+
+        var list = _tabOrder.ToList();
+        list.RemoveAt(fromPos);
+        list.Insert(toPos, _dragTabIndex);
+        _tabOrder = [.. list];
+
+        RebuildNavTabs();
+        UpdateNavOverflow();
+        SettingsManager.SaveTabOrder(_tabOrder);
+
+        _dragTabIndex = -1;
+    }
+
+    private void MoveTab(int tabIndex, int direction)
+    {
+        int pos = Array.IndexOf(_tabOrder, tabIndex);
+        int newPos = pos + direction;
+        if (newPos < 0 || newPos >= _tabOrder.Length) return;
+
+        (_tabOrder[pos], _tabOrder[newPos]) = (_tabOrder[newPos], _tabOrder[pos]);
+        RebuildNavTabs();
+        UpdateNavOverflow();
+        SettingsManager.SaveTabOrder(_tabOrder);
+    }
+
     private void AnimateViewTransition(Action buildNewContent, bool slideFromRight = true)
     {
         if (_isViewTransitioning) return;
@@ -1330,6 +1480,7 @@ public sealed partial class MainWindow : Window
         FrameworkElement target = _viewMode == ViewMode.Visualizer ? WaveformContainer
             : _viewMode == ViewMode.Equalizer ? EqualizerContainer
             : _viewMode == ViewMode.MediaControl ? MediaContainer
+            : _viewMode == ViewMode.Stats ? StatsContainer
             : _viewMode == ViewMode.Radio ? RadioContainer
             : (_viewMode == ViewMode.Albums || _viewMode == ViewMode.Artists) ? AlbumsGridView
             : (_viewMode == ViewMode.Podcast || _viewMode == ViewMode.PodcastEpisodes) ? PodcastContainer
@@ -1374,6 +1525,7 @@ public sealed partial class MainWindow : Window
             FrameworkElement newTarget = _viewMode == ViewMode.Visualizer ? WaveformContainer
                 : _viewMode == ViewMode.Equalizer ? EqualizerContainer
                 : _viewMode == ViewMode.MediaControl ? MediaContainer
+                : _viewMode == ViewMode.Stats ? StatsContainer
                 : _viewMode == ViewMode.Radio ? RadioContainer
                 : (_viewMode == ViewMode.Albums || _viewMode == ViewMode.Artists) ? AlbumsGridView
                 : (_viewMode == ViewMode.Podcast || _viewMode == ViewMode.PodcastEpisodes) ? PodcastContainer
@@ -2895,56 +3047,102 @@ public sealed partial class MainWindow : Window
 
     // -- More menu (Visualizer + Media) ----------------------------
 
+    private bool _moreFlyoutKeepOpen;
+
     private void NavMore_Click(object sender, RoutedEventArgs e)
     {
         var flyout = new Flyout();
-        flyout.FlyoutPresenterStyle = ActionPanel.CreateFlyoutPresenterStyle(minWidth: 160, maxWidth: 200);
+        flyout.FlyoutPresenterStyle = ActionPanel.CreateFlyoutPresenterStyle(minWidth: 200, maxWidth: 260);
 
-        var panel = new StackPanel { Spacing = 0 };
-
-        // Overflowed nav tabs
-        var overflowDefs = new (int idx, string icon, string label, Action click, ViewMode[] modes)[]
+        flyout.Closing += (_, args) =>
         {
-            (0, "\uE8F1", "Library", () => { flyout.Hide(); NavLibrary_Click(sender, e); }, [ViewMode.Library]),
-            (1, "\uE8FD", "Playlists", () => { flyout.Hide(); NavPlaylists_Click(sender, e); }, [ViewMode.PlaylistList, ViewMode.PlaylistDetail]),
-            (2, "\uE890", "Queue", () => { flyout.Hide(); NavQueue_Click(sender, e); }, [ViewMode.Queue]),
-            (3, "\uEC05", "Radio", () => { flyout.Hide(); NavRadio_Click(sender, e); }, [ViewMode.Radio]),
-            (4, "\uE774", "Podcasts", () => { flyout.Hide(); NavPodcast_Click(sender, e); }, [ViewMode.Podcast, ViewMode.PodcastEpisodes]),
+            if (_moreFlyoutKeepOpen)
+            {
+                args.Cancel = true;
+                _moreFlyoutKeepOpen = false;
+            }
         };
 
-        bool hasOverflow = false;
-        foreach (var def in overflowDefs)
+        BuildMoreFlyoutContent(flyout, sender, e);
+
+        flyout.ShowAt(sender as FrameworkElement ?? NavMoreBtn);
+    }
+
+    private void BuildMoreFlyoutContent(Flyout flyout, object sender, RoutedEventArgs e)
+    {
+        var panel = new StackPanel { Spacing = 0 };
+
+        for (int pos = 0; pos < _tabOrder.Length; pos++)
         {
-            if (_overflowedTabIndices.Contains(def.idx))
+            var idx = _tabOrder[pos];
+            var def = TabDefs[idx];
+            var currentPos = pos;
+            var capturedIdx = idx;
+
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            bool isActive = def.Modes.Contains(_viewMode);
+            var navBtn = ActionPanel.CreateButton(def.Icon, Strings.T(def.LabelKey), [],
+                () => { flyout.Hide(); NavTabClick(capturedIdx); }, isActive: isActive);
+            Grid.SetColumn(navBtn, 0);
+            row.Children.Add(navBtn);
+
+            // Move buttons
+            var movePanel = new StackPanel
             {
-                panel.Children.Add(ActionPanel.CreateButton(def.icon, Strings.T(def.label), [], def.click,
-                    isActive: def.modes.Contains(_viewMode)));
-                hasOverflow = true;
-            }
+                Orientation = Orientation.Horizontal,
+                Spacing = 0,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 4, 0)
+            };
+
+            var upBtn = new Button
+            {
+                Content = new FontIcon { Glyph = "\uE70E", FontSize = 10 },
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(4, 2, 4, 2),
+                MinHeight = 0, MinWidth = 0,
+                CornerRadius = new CornerRadius(3),
+                Opacity = currentPos > 0 ? 1.0 : 0.25,
+                IsEnabled = currentPos > 0
+            };
+            upBtn.Click += (_, _) =>
+            {
+                _moreFlyoutKeepOpen = true;
+                MoveTab(capturedIdx, -1);
+                BuildMoreFlyoutContent(flyout, sender, e);
+            };
+            movePanel.Children.Add(upBtn);
+
+            var downBtn = new Button
+            {
+                Content = new FontIcon { Glyph = "\uE70D", FontSize = 10 },
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(4, 2, 4, 2),
+                MinHeight = 0, MinWidth = 0,
+                CornerRadius = new CornerRadius(3),
+                Opacity = currentPos < _tabOrder.Length - 1 ? 1.0 : 0.25,
+                IsEnabled = currentPos < _tabOrder.Length - 1
+            };
+            downBtn.Click += (_, _) =>
+            {
+                _moreFlyoutKeepOpen = true;
+                MoveTab(capturedIdx, 1);
+                BuildMoreFlyoutContent(flyout, sender, e);
+            };
+            movePanel.Children.Add(downBtn);
+
+            Grid.SetColumn(movePanel, 1);
+            row.Children.Add(movePanel);
+
+            panel.Children.Add(row);
         }
 
-        if (hasOverflow)
-            panel.Children.Add(ActionPanel.CreateSeparator());
-
-        // Static items
-        panel.Children.Add(ActionPanel.CreateButton("\uE93F", Strings.T("Albums"), [],
-            () => { flyout.Hide(); NavAlbums_Click(sender, e); },
-            isActive: _viewMode == ViewMode.Albums || _viewMode == ViewMode.AlbumDetail));
-        panel.Children.Add(ActionPanel.CreateButton("\uE77B", Strings.T("Artists"), [],
-            () => { flyout.Hide(); NavArtists_Click(sender, e); },
-            isActive: _viewMode == ViewMode.Artists || _viewMode == ViewMode.ArtistDetail));
-        panel.Children.Add(ActionPanel.CreateButton("\uE9D9", Strings.T("Visualizer"), [],
-            () => { flyout.Hide(); NavVisualizer_Click(sender, e); },
-            isActive: _viewMode == ViewMode.Visualizer));
-        panel.Children.Add(ActionPanel.CreateButton("\uE9E9", Strings.T("Equalizer"), [],
-            () => { flyout.Hide(); NavEqualizer_Click(sender, e); },
-            isActive: _viewMode == ViewMode.Equalizer));
-        panel.Children.Add(ActionPanel.CreateButton("\uE93C", Strings.T("Media"), [],
-            () => { flyout.Hide(); NavMedia_Click(sender, e); },
-            isActive: _viewMode == ViewMode.MediaControl));
-
         flyout.Content = panel;
-        flyout.ShowAt(sender as FrameworkElement ?? NavMoreBtn);
     }
 
     // -- Albums ---------------------------------------------------
@@ -3585,6 +3783,238 @@ public sealed partial class MainWindow : Window
         UpdateNavigation();
         UpdateSpectrumTimer();
         AnimateViewTransition(() => _ = InitMediaSessionsAsync());
+    }
+
+    private void NavStats_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewMode == ViewMode.Stats) return;
+        _viewMode = ViewMode.Stats;
+        _currentPlaylist = null;
+        UpdateNavigation();
+        UpdateSpectrumTimer();
+        UpdateMediaTimer();
+        AnimateViewTransition(BuildStatsUI);
+    }
+
+    // -- Stats --------------------------------------------------------
+
+    private void BuildStatsUI()
+    {
+        StatsPanel.Children.Clear();
+
+        try { BuildStatsContent(); }
+        catch (Exception ex)
+        {
+            StatsPanel.Children.Add(new TextBlock
+            {
+                Text = $"Error: {ex.Message}\n{ex.StackTrace}",
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = ThemeHelper.Brush("TextFillColorSecondaryBrush"),
+                Margin = new Thickness(8)
+            });
+        }
+    }
+
+    private void BuildStatsContent()
+    {
+        // Total listening time
+        var (totalMs, totalPlays) = LibraryManager.GetTotalListeningTime();
+        var totalTime = TimeSpan.FromMilliseconds(totalMs);
+
+        // Empty state
+        if (totalPlays == 0)
+        {
+            StatsPanel.Children.Add(new TextBlock
+            {
+                Text = Strings.T("No listening history yet"),
+                FontSize = 13,
+                Foreground = ThemeHelper.Brush("TextFillColorSecondaryBrush"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 40, 0, 0)
+            });
+            return;
+        }
+
+        var summaryGrid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+        summaryGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        summaryGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var playsCard = CreateStatCard(Strings.T("Total Plays"), totalPlays.ToString("N0"));
+        Grid.SetColumn(playsCard, 0);
+        summaryGrid.Children.Add(playsCard);
+
+        string timeText;
+        if (totalTime.TotalHours >= 1)
+            timeText = Strings.T("{0}h {1}m", (int)totalTime.TotalHours, totalTime.Minutes);
+        else
+            timeText = Strings.T("{0} min", (int)totalTime.TotalMinutes);
+
+        var timeCard = CreateStatCard(Strings.T("Listening Time"), timeText);
+        Grid.SetColumn(timeCard, 1);
+        summaryGrid.Children.Add(timeCard);
+
+        StatsPanel.Children.Add(summaryGrid);
+
+        // Top tracks (clickable — plays the track)
+        var topTracks = LibraryManager.GetTopTracks(10);
+        if (topTracks.Count > 0)
+        {
+            StatsPanel.Children.Add(CreateSectionLabel(Strings.T("Top Tracks")));
+            for (int i = 0; i < topTracks.Count; i++)
+            {
+                var t = topTracks[i];
+                var row = CreateStatRow(
+                    $"{i + 1}",
+                    t.Title,
+                    t.Artist,
+                    Strings.T("{0} plays", t.PlayCount));
+                var trackId = t.TrackId;
+                row.Tapped += (_, _) =>
+                {
+                    var track = _allTracks.FirstOrDefault(tr => tr.Id == trackId);
+                    if (track != null)
+                        _ = PlaySingleTrack(track);
+                };
+                row.IsHitTestVisible = true;
+                StatsPanel.Children.Add(row);
+            }
+        }
+
+        // Top artists (clickable — navigates to artist detail)
+        var topArtists = LibraryManager.GetTopArtists(10);
+        if (topArtists.Count > 0)
+        {
+            StatsPanel.Children.Add(CreateSectionLabel(Strings.T("Top Artists")));
+            for (int i = 0; i < topArtists.Count; i++)
+            {
+                var a = topArtists[i];
+                var dur = TimeSpan.FromMilliseconds(a.TotalMs);
+                var durText = dur.TotalHours >= 1
+                    ? Strings.T("{0}h {1}m", (int)dur.TotalHours, dur.Minutes)
+                    : Strings.T("{0} min", (int)dur.TotalMinutes);
+                var row = CreateStatRow(
+                    $"{i + 1}",
+                    a.Artist,
+                    durText,
+                    Strings.T("{0} plays", a.PlayCount));
+                var artistName = a.Artist;
+                row.Tapped += (_, _) =>
+                {
+                    _currentArtistName = artistName;
+                    _viewMode = ViewMode.ArtistDetail;
+                    _currentPlaylist = null;
+                    UpdateNavigation();
+                    AnimateViewTransition(() => ApplyFilterAndSort());
+                };
+                row.IsHitTestVisible = true;
+                StatsPanel.Children.Add(row);
+            }
+        }
+    }
+
+    private async Task PlaySingleTrack(TrackInfo track)
+    {
+        var idx = _allTracks.FindIndex(t => t.Id == track.Id);
+        if (idx >= 0)
+            _queue.SetQueue(_allTracks, idx);
+        try { await _player.PlayTrackAsync(track); }
+        catch (Exception ex) { TrackArtist.Text = Strings.T("Error: {0}", ex.Message); }
+        UpdateNowPlaying(track);
+    }
+
+    private static Border CreateStatCard(string label, string value)
+    {
+        var panel = new StackPanel
+        {
+            Spacing = 2,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        panel.Children.Add(new TextBlock
+        {
+            Text = value,
+            FontSize = 20,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Foreground = ThemeHelper.Brush("AccentTextFillColorPrimaryBrush")
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 11,
+            Foreground = ThemeHelper.Brush("TextFillColorSecondaryBrush"),
+            HorizontalAlignment = HorizontalAlignment.Center
+        });
+        return new Border
+        {
+            Background = ThemeHelper.Brush("CardBackgroundFillColorDefaultBrush"),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(12, 10, 12, 10),
+            Margin = new Thickness(2),
+            Child = panel
+        };
+    }
+
+    private static TextBlock CreateSectionLabel(string text)
+    {
+        return new TextBlock
+        {
+            Text = text,
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Margin = new Thickness(0, 4, 0, 0)
+        };
+    }
+
+    private static Grid CreateStatRow(string rank, string primary, string secondary, string trailing)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 1, 0, 1) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var rankText = new TextBlock
+        {
+            Text = rank,
+            FontSize = 11,
+            Foreground = ThemeHelper.Brush("TextFillColorSecondaryBrush"),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(rankText, 0);
+
+        var infoPanel = new StackPanel { Spacing = 0, VerticalAlignment = VerticalAlignment.Center };
+        infoPanel.Children.Add(new TextBlock
+        {
+            Text = primary,
+            FontSize = 12,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxLines = 1
+        });
+        infoPanel.Children.Add(new TextBlock
+        {
+            Text = secondary,
+            FontSize = 11,
+            Foreground = ThemeHelper.Brush("TextFillColorSecondaryBrush"),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxLines = 1
+        });
+        Grid.SetColumn(infoPanel, 1);
+
+        var trailingText = new TextBlock
+        {
+            Text = trailing,
+            FontSize = 11,
+            Foreground = ThemeHelper.Brush("TextFillColorSecondaryBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0)
+        };
+        Grid.SetColumn(trailingText, 2);
+
+        grid.Children.Add(rankText);
+        grid.Children.Add(infoPanel);
+        grid.Children.Add(trailingText);
+        return grid;
     }
 
     // -- Media control ------------------------------------------------
@@ -4268,6 +4698,20 @@ public sealed partial class MainWindow : Window
         }));
         allButtons.Add((Button)panel.Children[^1]);
 
+        panel.Children.Add(ActionPanel.CreateButton("\uE8B5", Strings.T("Import Playlist"), [], async () =>
+        {
+            flyout.Hide();
+            await ImportPlaylistAsync();
+        }));
+        allButtons.Add((Button)panel.Children[^1]);
+
+        panel.Children.Add(ActionPanel.CreateButton("\uE74E", Strings.T("Export Playlist"), [], async () =>
+        {
+            flyout.Hide();
+            await ExportPlaylistAsync();
+        }));
+        allButtons.Add((Button)panel.Children[^1]);
+
         panel.Children.Add(ActionPanel.CreateSeparator());
 
         // ── Window ───────────────────────────────────────────────
@@ -4290,6 +4734,21 @@ public sealed partial class MainWindow : Window
             Pin_Click(this, new RoutedEventArgs());
         }));
         allButtons.Add((Button)panel.Children[^1]);
+
+        // Overlay widget toggle
+        {
+            var overlayLabel = _overlayWidget != null ? Strings.T("Hide Overlay") : Strings.T("Show Overlay");
+            var overlayBtn = ActionPanel.CreateButton("\uEE40", overlayLabel, [], () =>
+            {
+                flyout.Hide();
+                ToggleOverlayWidget();
+            });
+            overlayBtn.Tag = Strings.T("Overlay Widget") + " Widget Overlay";
+            allButtons.Add(overlayBtn);
+            panel.Children.Add(overlayBtn);
+        }
+
+        panel.Children.Add(ActionPanel.CreateSeparator());
 
         // Sleep timer — navigate to sub-panel
         {
@@ -4506,6 +4965,49 @@ public sealed partial class MainWindow : Window
             presenter.IsAlwaysOnTop = _isPinnedOnTop;
     }
 
+    // -- Overlay widget -----------------------------------------------
+
+    private void ToggleOverlayWidget()
+    {
+        if (_overlayWidget != null)
+        {
+            CloseOverlayWidget();
+            return;
+        }
+        OpenOverlayWidget();
+    }
+
+    private void OpenOverlayWidget()
+    {
+        if (_overlayWidget != null)
+        {
+            _overlayWidget.Activate();
+            return;
+        }
+
+        _overlayWidget = new OverlayWidget(_player, _queue,
+            onPrev: () => DispatcherQueue.TryEnqueue(() => Prev_Click(this, new RoutedEventArgs())),
+            onNext: () => DispatcherQueue.TryEnqueue(() => Next_Click(this, new RoutedEventArgs())),
+            onPlayPause: () => DispatcherQueue.TryEnqueue(() => PlayPause_Click(this, new RoutedEventArgs())));
+        _overlayWidget.Closed += OverlayWidget_Closed;
+        _overlayWidget.Activate();
+    }
+
+    private void OverlayWidget_Closed(object sender, WindowEventArgs args)
+    {
+        if (_overlayWidget == null) return;
+        _overlayWidget.Closed -= OverlayWidget_Closed;
+        _overlayWidget = null;
+    }
+
+    private void CloseOverlayWidget()
+    {
+        if (_overlayWidget == null) return;
+        _overlayWidget.Closed -= OverlayWidget_Closed;
+        _overlayWidget.Close();
+        _overlayWidget = null;
+    }
+
     private async void ScanAllFoldersAsync()
     {
         TrackCountText.Text = Strings.T("Scanning...");
@@ -4521,46 +5023,182 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // -- Playlist import / export ---------------------------------
+
+    private async Task ImportPlaylistAsync()
+    {
+        var picker = new FileOpenPicker();
+        picker.SuggestedStartLocation = PickerLocationId.MusicLibrary;
+        picker.FileTypeFilter.Add(".m3u");
+        picker.FileTypeFilter.Add(".m3u8");
+        picker.FileTypeFilter.Add(".pls");
+        InitializeWithWindow.Initialize(picker, _hwnd);
+
+        var file = await picker.PickSingleFileAsync();
+        if (file == null) return;
+
+        try
+        {
+            var result = await Task.Run(() => PlaylistPorter.Import(file.Path));
+            // Refresh playlist view if already there, otherwise navigate to it
+            if (_viewMode == ViewMode.PlaylistList)
+                LoadPlaylistList();
+            else
+            {
+                _viewMode = ViewMode.PlaylistList;
+                _currentPlaylist = null;
+                UpdateNavigation();
+                UpdateSpectrumTimer();
+                UpdateMediaTimer();
+                AnimateViewTransition(() => LoadPlaylistList());
+            }
+            ShowStatusMessage(Strings.T("Playlist imported: {0}/{1} tracks",
+                result.Imported.ToString(), result.Total.ToString()));
+        }
+        catch (Exception ex)
+        {
+            ShowStatusMessage(Strings.T("Error: {0}", ex.Message));
+        }
+    }
+
+    private async Task ExportPlaylistAsync()
+    {
+        var playlists = LibraryManager.GetPlaylists();
+        if (playlists.Count == 0)
+        {
+            ShowStatusMessage(Strings.T("No playlist to export"));
+            return;
+        }
+
+        // If already on the Playlists view and one is selected, pre-select it
+        PlaylistInfo? selected = _currentPlaylist;
+
+        // When no playlist is selected, ask the user to pick one via a simple dialog
+        if (selected == null)
+        {
+            var dialog = new Microsoft.UI.Xaml.Controls.ContentDialog
+            {
+                Title = Strings.T("Select a playlist to export"),
+                CloseButtonText = Strings.T("Cancel"),
+                XamlRoot = Content.XamlRoot
+            };
+            var listView = new Microsoft.UI.Xaml.Controls.ListView
+            {
+                ItemsSource = playlists.Select(p => p.Name).ToList(),
+                Height = 240
+            };
+            dialog.Content = listView;
+            dialog.PrimaryButtonText = Strings.T("Export");
+            dialog.IsPrimaryButtonEnabled = false;
+            listView.SelectionChanged += (_, _) =>
+                dialog.IsPrimaryButtonEnabled = listView.SelectedIndex >= 0;
+
+            var dlgResult = await dialog.ShowAsync();
+            if (dlgResult != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) return;
+            selected = playlists[listView.SelectedIndex];
+        }
+
+        var savePicker = new FileSavePicker();
+        savePicker.SuggestedStartLocation = PickerLocationId.MusicLibrary;
+        savePicker.SuggestedFileName = selected.Name;
+        savePicker.FileTypeChoices.Add("M3U Playlist", [".m3u8"]);
+        savePicker.FileTypeChoices.Add("PLS Playlist", [".pls"]);
+        InitializeWithWindow.Initialize(savePicker, _hwnd);
+
+        var saveFile = await savePicker.PickSaveFileAsync();
+        if (saveFile == null) return;
+
+        try
+        {
+            await Task.Run(() => PlaylistPorter.Export(selected.Id, saveFile.Path));
+            ShowStatusMessage($"\"{selected.Name}\" → {Path.GetFileName(saveFile.Path)}");
+        }
+        catch (Exception ex)
+        {
+            ShowStatusMessage(Strings.T("Error: {0}", ex.Message));
+        }
+    }
+
+    private CancellationTokenSource? _statusMsgCts;
+
+    private void ShowStatusMessage(string message)
+    {
+        _statusMsgCts?.Cancel();
+        _statusMsgCts = new CancellationTokenSource();
+        var cts = _statusMsgCts;
+
+        TrackCountText.Text = message;
+        _ = Task.Delay(3000, cts.Token).ContinueWith(_ =>
+        {
+            if (!cts.IsCancellationRequested)
+                DispatcherQueue.TryEnqueue(RefreshTrackCountText);
+        }, TaskScheduler.Default);
+    }
+
+    private void RefreshTrackCountText()
+    {
+        TrackCountText.Text = _viewMode switch
+        {
+            ViewMode.Library => Strings.T("{0} tracks", _allTracks.Count.ToString("N0")),
+            ViewMode.PlaylistList => Strings.T("{0} playlists",
+                LibraryManager.GetPlaylists().Count.ToString("N0")),
+            _ => TrackCountText.Text
+        };
+    }
+
     // -- Backdrop -------------------------------------------------
 
     private void ApplyBackdrop(BackdropSettings settings)
     {
-        _acrylicController?.Dispose();
-        _acrylicController = null;
+        _backdropController?.Dispose();
+        _backdropController = null;
+        _configSource = null;
+        SystemBackdrop = null;
 
-        if (settings.Type == "acrylic_custom")
+        if (settings.Type == "none")
+            return;
+
+        // Always use controller API with IsInputActive = true
+        // to keep the backdrop effect visible when the window loses focus
+        _backdropController = settings.Type switch
         {
-            SystemBackdrop = null;
+            "mica" when MicaController.IsSupported()
+                => new MicaController(),
+            "mica_alt" when MicaController.IsSupported()
+                => new MicaController { Kind = MicaKind.BaseAlt },
+            "acrylic_custom" when DesktopAcrylicController.IsSupported()
+                => new DesktopAcrylicController
+                {
+                    TintOpacity = (float)settings.TintOpacity,
+                    LuminosityOpacity = (float)settings.LuminosityOpacity,
+                    TintColor = ParseColor(settings.TintColor),
+                    FallbackColor = ParseColor(settings.FallbackColor),
+                    Kind = settings.Kind == "Thin"
+                        ? DesktopAcrylicKind.Thin
+                        : DesktopAcrylicKind.Base,
+                },
+            _ when DesktopAcrylicController.IsSupported()
+                => new DesktopAcrylicController(),
+            _ => null
+        };
 
-            _configSource = new SystemBackdropConfiguration { IsInputActive = true };
-            if (Content is FrameworkElement fe)
-                _configSource.Theme = (SystemBackdropTheme)fe.ActualTheme;
+        if (_backdropController == null) return;
 
-            _acrylicController = new DesktopAcrylicController
-            {
-                TintOpacity = (float)settings.TintOpacity,
-                LuminosityOpacity = (float)settings.LuminosityOpacity,
-                TintColor = ParseColor(settings.TintColor),
-                FallbackColor = ParseColor(settings.FallbackColor),
-                Kind = settings.Kind == "Thin"
-                    ? DesktopAcrylicKind.Thin
-                    : DesktopAcrylicKind.Base,
-            };
+        _configSource = new SystemBackdropConfiguration { IsInputActive = true };
+        if (Content is FrameworkElement fe)
+            _configSource.Theme = (SystemBackdropTheme)fe.ActualTheme;
 
-            _acrylicController.AddSystemBackdropTarget(
-                this.As<Microsoft.UI.Composition.ICompositionSupportsSystemBackdrop>());
-            _acrylicController.SetSystemBackdropConfiguration(_configSource);
-        }
-        else
+        var target = this.As<Microsoft.UI.Composition.ICompositionSupportsSystemBackdrop>();
+        switch (_backdropController)
         {
-            _configSource = null;
-            SystemBackdrop = settings.Type switch
-            {
-                "mica" => new MicaBackdrop(),
-                "mica_alt" => new MicaBackdrop { Kind = MicaKind.BaseAlt },
-                "none" => null,
-                _ => new DesktopAcrylicBackdrop()
-            };
+            case MicaController mica:
+                mica.AddSystemBackdropTarget(target);
+                mica.SetSystemBackdropConfiguration(_configSource);
+                break;
+            case DesktopAcrylicController acrylic:
+                acrylic.AddSystemBackdropTarget(target);
+                acrylic.SetSystemBackdropConfiguration(_configSource);
+                break;
         }
     }
 
@@ -5056,12 +5694,12 @@ public sealed partial class MainWindow : Window
     /// <summary>Re-apply all localized text to XAML-defined elements.</summary>
     private void ApplyLocalization()
     {
-        // Navigation tabs
-        NavLibraryText.Text = Strings.T("Library");
-        NavPlaylistsText.Text = Strings.T("Playlists");
-        NavQueueText.Text = Strings.T("Queue");
-        NavRadioText.Text = Strings.T("Radio");
-        NavPodcastText.Text = Strings.T("Podcasts");
+        // Navigation tabs (dynamic)
+        for (int i = 0; i < TabDefs.Length; i++)
+        {
+            if (_navTexts[i] != null)
+                _navTexts[i].Text = Strings.T(TabDefs[i].LabelKey);
+        }
 
         // Sort menu
         SortTitle.Text = Strings.T("Title");
