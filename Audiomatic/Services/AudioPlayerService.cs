@@ -57,6 +57,8 @@ public sealed class AudioPlayerService : IDisposable
     public event Action<bool>? BufferingChanged;
     /// <summary>Fired when gapless transition occurs — the next track started seamlessly.</summary>
     public event Action<TrackInfo>? GaplessTransitioned;
+    public event Action? SmtcPreviousRequested;
+    public event Action? SmtcNextRequested;
 
     public TrackInfo? CurrentTrack { get; private set; }
     public bool IsPlaying { get; private set; }
@@ -110,6 +112,7 @@ public sealed class AudioPlayerService : IDisposable
         // Disable automatic command handling so other apps (YouTube, etc.)
         // cannot pause our playback through system media transport commands.
         _mediaPlayer.CommandManager.IsEnabled = false;
+        _mediaPlayer.AutoPlay = false;
 
         _mediaPlayer.MediaEnded += (_, _) =>
         {
@@ -153,6 +156,12 @@ public sealed class AudioPlayerService : IDisposable
                     case SystemMediaTransportControlsButton.Pause:
                         Pause();
                         smtc.PlaybackStatus = MediaPlaybackStatus.Paused;
+                        break;
+                    case SystemMediaTransportControlsButton.Previous:
+                        SmtcPreviousRequested?.Invoke();
+                        break;
+                    case SystemMediaTransportControlsButton.Next:
+                        SmtcNextRequested?.Invoke();
                         break;
                 }
             });
@@ -211,6 +220,11 @@ public sealed class AudioPlayerService : IDisposable
             };
             _waveOut.Play();
             IsPlaying = true;
+
+            // Set file as MediaPlayer source (paused/muted) so the SMTC session
+            // is fully active and exposes thumbnail to GlobalSystemMediaTransportControls
+            _mediaPlayer.Source = MediaSource.CreateFromUri(new Uri(track.Path));
+
             UpdateSmtc(track);
             _dispatcherQueue?.TryEnqueue(() =>
             {
@@ -447,6 +461,7 @@ public sealed class AudioPlayerService : IDisposable
             _waveOut = null;
             _audioReader?.Dispose();
             _audioReader = null;
+            _mediaPlayer.Source = null;
         }
         else
         {
@@ -534,6 +549,8 @@ public sealed class AudioPlayerService : IDisposable
                 var writer = new DataWriter(newStream.GetOutputStreamAt(0));
                 writer.WriteBytes(embeddedArtData);
                 writer.StoreAsync().GetResults();
+                writer.DetachStream();
+                newStream.Seek(0);
                 updater.Thumbnail = RandomAccessStreamReference.CreateFromStream(newStream);
 
                 _albumArtStream?.Dispose();

@@ -244,6 +244,8 @@ public sealed partial class MainWindow : Window
         _player.PositionChanged += OnPositionChanged;
         _player.BufferingChanged += OnBufferingChanged;
         _player.GaplessTransitioned += OnGaplessTransitioned;
+        _player.SmtcPreviousRequested += () => Prev_Click(this, new RoutedEventArgs());
+        _player.SmtcNextRequested += () => Next_Click(this, new RoutedEventArgs());
         VolumeSlider.Value = settings.Volume * 100;
         _player.Volume = settings.Volume;
         _sortBy = settings.SortBy;
