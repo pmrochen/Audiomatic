@@ -48,6 +48,18 @@ public static class Strings
         ["Visualizer"] = new() { ["en"] = "Visualizer", ["fr"] = "Visualiseur" },
         ["Equalizer"] = new() { ["en"] = "Equalizer", ["fr"] = "Égaliseur" },
         ["Media"] = new() { ["en"] = "Media", ["fr"] = "Média" },
+        ["Tabs"] = new() { ["en"] = "Tabs", ["fr"] = "Onglets" },
+        ["Stats"] = new() { ["en"] = "Stats", ["fr"] = "Stats" },
+
+        // ── Stats ──────────────────────────────────────────────
+        ["Total Plays"] = new() { ["en"] = "Total Plays", ["fr"] = "Écoutes" },
+        ["Listening Time"] = new() { ["en"] = "Listening Time", ["fr"] = "Temps d'écoute" },
+        ["{0}h {1}m"] = new() { ["en"] = "{0}h {1}m", ["fr"] = "{0}h {1}m" },
+        ["{0} min"] = new() { ["en"] = "{0} min", ["fr"] = "{0} min" },
+        ["Top Tracks"] = new() { ["en"] = "Top Tracks", ["fr"] = "Pistes les plus écoutées" },
+        ["Top Artists"] = new() { ["en"] = "Top Artists", ["fr"] = "Artistes favoris" },
+        ["{0} plays"] = new() { ["en"] = "{0} plays", ["fr"] = "{0} écoutes" },
+        ["No listening history yet"] = new() { ["en"] = "No listening history yet", ["fr"] = "Aucun historique d'écoute" },
 
         // ── Player ──────────────────────────────────────────────
         ["No track"] = new() { ["en"] = "No track", ["fr"] = "Aucune piste" },
@@ -149,7 +161,16 @@ public static class Strings
         ["Actions"] = new() { ["en"] = "Actions", ["fr"] = "Actions" },
         ["Add Folder"] = new() { ["en"] = "Add Folder", ["fr"] = "Ajouter un dossier" },
         ["Scan Library"] = new() { ["en"] = "Scan Library", ["fr"] = "Scanner la bibliothèque" },
+        ["Import Playlist"] = new() { ["en"] = "Import Playlist", ["fr"] = "Importer une playlist" },
+        ["Export Playlist"] = new() { ["en"] = "Export Playlist", ["fr"] = "Exporter une playlist" },
+        ["Playlist imported: {0}/{1} tracks"] = new() { ["en"] = "Playlist imported: {0}/{1} tracks", ["fr"] = "Playlist importée : {0}/{1} pistes" },
+        ["No playlist to export"] = new() { ["en"] = "No playlist to export", ["fr"] = "Aucune playlist à exporter" },
+        ["Select a playlist to export"] = new() { ["en"] = "Select a playlist to export", ["fr"] = "Sélectionner une playlist à exporter" },
         ["Reset Library"] = new() { ["en"] = "Reset Library", ["fr"] = "Réinitialiser la bibliothèque" },
+        ["About"] = new() { ["en"] = "About", ["fr"] = "À propos" },
+        ["Developer"] = new() { ["en"] = "Developer", ["fr"] = "Développeur" },
+        ["GitHub"] = new() { ["en"] = "GitHub", ["fr"] = "GitHub" },
+        ["Buy Me a Coffee"] = new() { ["en"] = "Buy Me a Coffee", ["fr"] = "Buy Me a Coffee" },
         ["Backdrop"] = new() { ["en"] = "Backdrop", ["fr"] = "Arrière-plan" },
         ["Acrylic"] = new() { ["en"] = "Acrylic", ["fr"] = "Acrylique" },
         ["Custom Acrylic"] = new() { ["en"] = "Custom Acrylic", ["fr"] = "Acrylique personnalisé" },
@@ -239,6 +260,11 @@ public static class Strings
         ["Done. {0} new tracks found."] = new() { ["en"] = "Done. {0} new tracks found.", ["fr"] = "Terminé. {0} nouvelles pistes trouvées." },
         ["Scanning all folders..."] = new() { ["en"] = "Scanning all folders...", ["fr"] = "Analyse de tous les dossiers..." },
         ["Unknown folder ({0})"] = new() { ["en"] = "Unknown folder ({0})", ["fr"] = "Dossier inconnu ({0})" },
+
+        // ── Overlay widget ─────────────────────────────────────
+        ["Overlay Widget"] = new() { ["en"] = "Overlay Widget", ["fr"] = "Widget flottant" },
+        ["Show Overlay"] = new() { ["en"] = "Show Overlay", ["fr"] = "Afficher le widget" },
+        ["Hide Overlay"] = new() { ["en"] = "Hide Overlay", ["fr"] = "Masquer le widget" },
 
         // ── Tray ────────────────────────────────────────────────
         ["Show\tCtrl+Alt+M"] = new() { ["en"] = "Show\tCtrl+Alt+M", ["fr"] = "Afficher\tCtrl+Alt+M" },
