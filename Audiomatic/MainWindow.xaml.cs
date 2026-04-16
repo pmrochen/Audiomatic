@@ -248,6 +248,7 @@ public sealed partial class MainWindow : Window
         _player.SmtcNextRequested += () => Next_Click(this, new RoutedEventArgs());
         VolumeSlider.Value = settings.Volume * 100;
         _player.Volume = settings.Volume;
+        _player.ExclusiveMode = settings.ExclusiveMode;
         _sortBy = settings.SortBy;
         _sortAscending = settings.SortAscending;
         SortAscending.IsChecked = _sortAscending;
@@ -331,6 +332,7 @@ public sealed partial class MainWindow : Window
             SettingsManager.Save(s with
             {
                 Volume = _player.Volume,
+                ExclusiveMode = _player.ExclusiveMode,
                 ShuffleEnabled = _queue.Shuffle,
                 RepeatMode = _queue.Repeat.ToString(),
                 SortBy = _sortBy,

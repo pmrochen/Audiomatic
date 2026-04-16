@@ -15,6 +15,7 @@ public record BackdropSettings(
 public record AppSettings(
     BackdropSettings Backdrop,
     double Volume,
+    bool ExclusiveMode,
     bool ShuffleEnabled,
     string RepeatMode,  // "none", "all", "one"
     string SortBy,      // "title", "artist", "album", "duration", "added"
@@ -148,6 +149,7 @@ public static class SettingsManager
     private static AppSettings CreateDefault() => new(
         Backdrop: new BackdropSettings(),
         Volume: 1.0,
+        ExclusiveMode: false,
         ShuffleEnabled: false,
         RepeatMode: "none",
         SortBy: "title",

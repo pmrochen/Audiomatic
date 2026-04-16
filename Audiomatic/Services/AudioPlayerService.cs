@@ -21,6 +21,7 @@ public sealed class AudioPlayerService : IDisposable
 	private bool _useNAudio;
     private bool _isMuted;
     private double _volume = 1.0;
+    private bool _exclusiveMode;
     private InMemoryRandomAccessStream? _albumArtStream;
 
     // Equalizer
@@ -48,6 +49,9 @@ public sealed class AudioPlayerService : IDisposable
     // NAudio-supported but not natively by MediaPlayer
     private static readonly HashSet<string> NAudioOnlyExtensions =
         new(StringComparer.OrdinalIgnoreCase) { ".ape", ".aiff" };
+
+    // Wasapi parameters
+    private const int _wasapiDefaultLatency = 200;
 
     public event Action? PlaybackStarted;
     public event Action? PlaybackPaused;
@@ -91,7 +95,9 @@ public sealed class AudioPlayerService : IDisposable
             _mediaPlayer.Volume = _volume;
             if (_audioReader != null)
                 _audioReader.Volume = _isMuted ? 0f : (float)_volume;
-        }
+            else if (_useNAudio && (_waveOut != null))
+				_waveOut.Volume = _isMuted ? 0f : (float)_volume;
+		}
     }
     public bool IsMuted
     {
@@ -102,10 +108,17 @@ public sealed class AudioPlayerService : IDisposable
             _mediaPlayer.IsMuted = value;
             if (_audioReader != null)
                 _audioReader.Volume = value ? 0f : (float)_volume;
-        }
-    }
+			else if (_useNAudio && (_waveOut != null))
+				_waveOut.Volume = _isMuted ? 0f : (float)_volume;
+		}
+	}
+	public bool ExclusiveMode
+	{
+		get => _exclusiveMode;
+		set => _exclusiveMode = value;
+	}
 
-    private Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
+	private Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
     private System.Threading.Timer? _positionTimer;
     private bool _mediaEndedFired;
 
@@ -208,7 +221,7 @@ public sealed class AudioPlayerService : IDisposable
                 _dispatcherQueue?.TryEnqueue(() => MediaEnded?.Invoke());
             };
 
-            _waveOut = new WasapiOut();
+            _waveOut = _exclusiveMode ? new WasapiOut(AudioClientShareMode.Exclusive, _wasapiDefaultLatency) : new WasapiOut();
             _waveOut.Init(new NAudio.Wave.SampleProviders.SampleToWaveProvider16(_gaplessProvider));
             _waveOut.PlaybackStopped += (_, _) =>
             {
@@ -360,7 +373,7 @@ public sealed class AudioPlayerService : IDisposable
 
 		try
 		{
-            if (true) // Can use NAudio for streaming?
+            if (true) // Enable NAudio for streaming
             {
                 // Use NAudio for stream playback
                 _useNAudio = true;
@@ -369,11 +382,10 @@ public sealed class AudioPlayerService : IDisposable
 				/*await*/ _waveStream = new MediaFoundationReader(streamUri.ToString());
 				_audioReader = null;
 
-                // #TODO Enable volume control
-
 				// NAudio renders via WASAPI
-				_waveOut = new WasapiOut(/*AudioClientShareMode.Exclusive, latency: 200*/); // #TODO Enable exclusive mode via option switch
+				_waveOut = _exclusiveMode ? new WasapiOut(AudioClientShareMode.Exclusive, _wasapiDefaultLatency) : new WasapiOut();
 				_waveOut.Init(_waveStream);
+				_waveOut.Volume = _isMuted ? 0f : (float)_volume;
 				_waveOut.Play();
 
 				IsPlaying = true;
