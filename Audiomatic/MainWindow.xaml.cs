@@ -4674,6 +4674,14 @@ public sealed partial class MainWindow : Window
         allButtons.Add(vizBtn);
         panel.Children.Add(vizBtn);
 
+        // Exclusive mode
+        var exclusiveBtn = ActionPanel.CreateCheckItem(Strings.T("Exclusive Mode"), _player.ExclusiveMode, () =>
+		{
+			flyout.Hide();
+			_player.ExclusiveMode = !_player.ExclusiveMode;
+		});
+		panel.Children.Add(exclusiveBtn);
+
         panel.Children.Add(ActionPanel.CreateSeparator());
 
         // ── Language cascade ─────────────────────────────────────

@@ -164,6 +164,7 @@ public static class Strings
         ["Choose Accent..."] = new() { ["en"] = "Choose Accent...", ["fr"] = "Choisir l'accent...", ["pl"] = "Wybierz akcent..." },
         ["30 FPS"] = new() { ["en"] = "30 FPS", ["fr"] = "30 IPS", ["pl"] = "30 FPS" },
         ["60 FPS"] = new() { ["en"] = "60 FPS", ["fr"] = "60 IPS", ["pl"] = "60 FPS" },
+        ["Exclusive Mode"] = new() { ["en"] = "Exclusive Mode", ["fr"] = "Mode exclusif", ["pl"] = "Tryb wyłączny" },
         ["Compact Mode"] = new() { ["en"] = "Compact Mode", ["fr"] = "Mode compact", ["pl"] = "Tryb kompaktowy" },
         ["Mini Player"] = new() { ["en"] = "Mini Player", ["fr"] = "Mini lecteur", ["pl"] = "Mini odtwarzacz" },
         ["Unpin from Top"] = new() { ["en"] = "Unpin from Top", ["fr"] = "Détacher du premier plan", ["pl"] = "Odepnij z pierwszego planu" },
