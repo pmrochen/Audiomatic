@@ -238,28 +238,8 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Tab buttons (Library / Playlists) -->
+            <!-- Tab buttons (dynamically populated by RebuildNavTabs) -->
             <StackPanel x:Name="NavTabs" Grid.Column="0" Orientation="Horizontal" Spacing="2">
-                <Button x:Name="NavLibraryBtn" Background="Transparent" BorderThickness="0"
-                        Padding="8,4" Click="NavLibrary_Click">
-                    <TextBlock x:Name="NavLibraryText" Text="Library" FontSize="12" FontWeight="SemiBold"/>
-                </Button>
-                <Button x:Name="NavPlaylistsBtn" Background="Transparent" BorderThickness="0"
-                        Padding="8,4" Click="NavPlaylists_Click">
-                    <TextBlock x:Name="NavPlaylistsText" Text="Playlists" FontSize="12"/>
-                </Button>
-                <Button x:Name="NavQueueBtn" Background="Transparent" BorderThickness="0"
-                        Padding="8,4" Click="NavQueue_Click">
-                    <TextBlock x:Name="NavQueueText" Text="Queue" FontSize="12"/>
-                </Button>
-                <Button x:Name="NavRadioBtn" Background="Transparent" BorderThickness="0"
-                        Padding="8,4" Click="NavRadio_Click">
-                    <TextBlock x:Name="NavRadioText" Text="Radio" FontSize="12"/>
-                </Button>
-                <Button x:Name="NavPodcastBtn" Background="Transparent" BorderThickness="0"
-                        Padding="8,4" Click="NavPodcast_Click">
-                    <TextBlock x:Name="NavPodcastText" Text="Podcasts" FontSize="12"/>
-                </Button>
                 <Button x:Name="NavMoreBtn" Background="Transparent" BorderThickness="0"
                         Padding="8,4" Click="NavMore_Click">
                     <TextBlock x:Name="NavMoreText" Text="..." FontSize="12"/>
@@ -502,6 +482,11 @@
         <ScrollViewer x:Name="MediaContainer" Grid.Row="7" Visibility="Collapsed"
                       Padding="6,0">
             <StackPanel x:Name="MediaSessionList" Spacing="4"/>
+        </ScrollViewer>
+
+        <ScrollViewer x:Name="StatsContainer" Grid.Row="7" Visibility="Collapsed"
+                      Padding="10,0">
+            <StackPanel x:Name="StatsPanel" Spacing="12"/>
         </ScrollViewer>
 
         <!-- Row 8: Bottom bar -->

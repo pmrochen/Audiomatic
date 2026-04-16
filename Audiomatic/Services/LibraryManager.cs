@@ -90,6 +90,21 @@ public static class LibraryManager
             """;
         cmd.ExecuteNonQuery();
 
+        // Play history table
+        using var histCmd = conn.CreateCommand();
+        histCmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS play_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id INTEGER NOT NULL,
+                played_at INTEGER NOT NULL DEFAULT 0,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_play_history_track ON play_history(track_id);
+            CREATE INDEX IF NOT EXISTS idx_play_history_date ON play_history(played_at);
+            """;
+        histCmd.ExecuteNonQuery();
+
         // Migration: add bpm column if missing
         using var colCheck = conn.CreateCommand();
         colCheck.CommandText = "PRAGMA table_info(tracks);";
@@ -415,6 +430,34 @@ public static class LibraryManager
         return Convert.ToInt32(cmd.ExecuteScalar());
     }
 
+    /// <summary>
+    /// Returns a path→TrackInfo map for all paths that exist in the library.
+    /// Lookup is case-insensitive (path normalised to lower-case as key).
+    /// </summary>
+    public static Dictionary<string, TrackInfo> GetTracksByPaths(IEnumerable<string> paths)
+    {
+        var normalised = paths.Select(p => p.Replace('/', '\\').TrimEnd()).ToList();
+        if (normalised.Count == 0) return [];
+
+        using var conn = new SqliteConnection(ConnectionString);
+        conn.Open();
+        EnablePragmas(conn);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT t.id, t.path, t.title, t.artist, t.album, t.duration_ms,
+                   t.track_number, t.year, t.genre, t.bpm, t.folder_id, t.hash, t.last_modified, t.created_at,
+                   CASE WHEN f.track_id IS NOT NULL THEN 1 ELSE 0 END as is_fav
+            FROM tracks t
+            LEFT JOIN favorites f ON f.track_id = t.id;
+            """;
+        var all = ReadTracks(cmd);
+        return all
+            .GroupBy(t => t.Path.Replace('/', '\\').TrimEnd(),
+                     StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key.ToLowerInvariant(), g => g.First(),
+                          StringComparer.OrdinalIgnoreCase);
+    }
+
     private static List<TrackInfo> ReadTracks(SqliteCommand cmd)
     {
         var tracks = new List<TrackInfo>();
@@ -724,4 +767,81 @@ public static class LibraryManager
         }
         return totalAdded;
     }
+
+    // ── Play history & stats ─────────────────────────────────
+
+    public static void RecordPlay(long trackId, int durationMs)
+    {
+        using var conn = new SqliteConnection(ConnectionString);
+        conn.Open();
+        EnablePragmas(conn);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO play_history (track_id, played_at, duration_ms)
+            VALUES ($tid, $ts, $dur)
+            """;
+        cmd.Parameters.AddWithValue("$tid", trackId);
+        cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        cmd.Parameters.AddWithValue("$dur", durationMs);
+        cmd.ExecuteNonQuery();
+    }
+
+    public record PlayStat(long TrackId, string Title, string Artist, string Album, int PlayCount, long TotalMs);
+
+    public static List<PlayStat> GetTopTracks(int limit = 10)
+    {
+        using var conn = new SqliteConnection(ConnectionString);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT h.track_id, t.title, t.artist, t.album, COUNT(*) as cnt, SUM(h.duration_ms) as total
+            FROM play_history h
+            JOIN tracks t ON t.id = h.track_id
+            GROUP BY h.track_id
+            ORDER BY cnt DESC
+            LIMIT $limit
+            """;
+        cmd.Parameters.AddWithValue("$limit", limit);
+        var list = new List<PlayStat>();
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            list.Add(new PlayStat(r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetInt32(4), r.GetInt64(5)));
+        return list;
+    }
+
+    public record ArtistStat(string Artist, int PlayCount, long TotalMs);
+
+    public static List<ArtistStat> GetTopArtists(int limit = 10)
+    {
+        using var conn = new SqliteConnection(ConnectionString);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT t.artist, COUNT(*) as cnt, SUM(h.duration_ms) as total
+            FROM play_history h
+            JOIN tracks t ON t.id = h.track_id
+            WHERE t.artist != ''
+            GROUP BY t.artist COLLATE NOCASE
+            ORDER BY cnt DESC
+            LIMIT $limit
+            """;
+        cmd.Parameters.AddWithValue("$limit", limit);
+        var list = new List<ArtistStat>();
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            list.Add(new ArtistStat(r.GetString(0), r.GetInt32(1), r.GetInt64(2)));
+        return list;
+    }
+
+    public static (long TotalMs, int TotalPlays) GetTotalListeningTime()
+    {
+        using var conn = new SqliteConnection(ConnectionString);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COALESCE(SUM(duration_ms),0), COUNT(*) FROM play_history";
+        using var r = cmd.ExecuteReader();
+        r.Read();
+        return (r.GetInt64(0), r.GetInt32(1));
+    }
+
 }

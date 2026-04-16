@@ -1,14 +1,14 @@
 # Audiotomatic
 
-A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .NET 8.
+A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .NET 10.
 
 ![Windows](https://img.shields.io/badge/platform-Windows%2011-0078D4?logo=windows11)
-![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)
+![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)
 ![WinUI 3](https://img.shields.io/badge/WinUI-3-blue)
 
 ![Audiomatic](https://res.cloudinary.com/dptrimoqv/image/upload/v1773230722/158shots_so_jvlq5x.png)
 
-[Download](https://github.com/devohmycode/Audiomatic/releases/download/v0.1.1/Audiomatic-Setup-x64.exe)
+[Download](https://github.com/devohmycode/Audiomatic/releases)
 
 ## Features
 
@@ -37,6 +37,7 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 - Create, rename, and delete playlists
 - Add/remove tracks and reorder within playlists
 - Quick "Add to Playlist" from any track context menu
+- **Import/Export** — import and export playlists in M3U/M3U8 and PLS formats; relative paths resolved automatically, tracks matched case-insensitively against the library
 
 ### Queue Management
 
@@ -103,6 +104,7 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 | **Artists** | Browse library grouped by artist with circular artwork cards |
 | **Equalizer** | 10-band graphic EQ with presets, preamp, and per-band control |
 | **Visualizer** | Real-time FFT spectrum analyzer with mirror mode (via "..." menu) |
+| **Stats** | Play history, top tracks, top artists, and total listening time |
 | **Media Control** | Monitor and control background media players via "..." menu |
 
 ### Metadata Editor
@@ -120,10 +122,27 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 - **Timeline scrubbing** — seek within tracks with real-time position and duration display
 - **Live updates** — automatically refreshes when sessions start, stop, or change tracks
 
+### Overlay Widget
+
+- **Floating mini-player** — a borderless, always-on-top overlay window for quick playback control without opening the main app
+- **Compact layout (320×78 px)** — album art, track title & artist, progress bar, and transport controls (previous, play/pause, next, close)
+- **Drag to reposition** — move freely anywhere on screen; position persists across restarts
+- **Acrylic backdrop** — translucent background with frameless design (stays visible when unfocused)
+- **Real-time sync** — artwork, progress, and play state update live from the main player
+- Toggle from the settings menu or via keyboard shortcut
+
+### Stats & Play History
+
+- **Play tracking** — every play longer than 10 seconds is recorded with duration
+- **Top tracks** — most-played tracks ranked by play count
+- **Top artists** — most-listened artists ranked by total listening time
+- **Total listening time** — aggregate across all sessions
+
 ### Window & UI
 
 - **Three display modes** — Expanded (710px), Compact (220px), and Mini-player (60px)
 - **Mini-player** — ultra-compact mode showing album art, track info, and play/pause button
+- **Overlay widget** — detached floating mini-player (see above)
 - **Animated transitions** — Fluent slide+fade animations between views
 - **Collapse cycling** with smooth animation anchored to bottom (`Ctrl+L`)
 - **Always-on-Top** pin mode
@@ -133,11 +152,12 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 - **Window position** remembered across restarts
 - **Custom draggable title bar**
 - **Raycast-style context menus** for tracks, playlists, and queue items
+- **Draggable tab reordering** — rearrange navigation tabs by drag & drop; custom order persisted across sessions
 
 ### System Integration
 
 - **System tray** — minimize to tray, left-click to show/hide, right-click menu
-- **System Media Transport Controls (SMTC)** — play/pause, next/previous, track info and artwork displayed in Windows media overlay
+- **System Media Transport Controls (SMTC)** — play/pause, next/previous, track info and artwork displayed in Windows media overlay; disables automatic command handling to prevent conflicts with other media apps
 - **Drag & Drop** — drop audio files from Explorer to play or queue them, or drop folders to add them to the library
 - **Global hotkeys**:
   - `Ctrl+Alt+M` — Show/Hide window
@@ -152,7 +172,8 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 - Custom accent color picker (24 presets + hex input)
 - Display mode cycling and pin-on-top toggles
 - Equalizer configuration (bands, presets, preamp)
-- Visualizer FPS selection (30 / 60 FPS)
+- Visualizer FPS selection (30 / 60 FPS) and mode (classic, bars, circle, wave) with glow and dark background toggles
+- Overlay widget toggle (show/hide floating mini-player)
 - All preferences persisted in `settings.json`
 
 ![Audiomatic2](https://res.cloudinary.com/dptrimoqv/image/upload/v1773226483/52shots_so_elqw2c.png)
@@ -162,10 +183,11 @@ A modern, compact desktop audio player for Windows 11, built with WinUI 3 and .N
 | Component | Technology |
 |-----------|------------|
 | Framework | WinUI 3 (Windows App SDK 1.8) |
-| Language | C# / .NET 8.0 |
+| Language | C# / .NET 10.0 |
 | Audio | Windows MediaPlayer + NAudio 2.2.1 (WASAPI) |
+| Graphics | Microsoft.Graphics.Win2D 1.4.0 |
 | Metadata | TagLibSharp 2.3.0 |
-| Database | Microsoft.Data.Sqlite 8.0.11 |
+| Database | Microsoft.Data.Sqlite 10.0.5 |
 | Target | Windows 10.0.19041.0+ |
 
 ## Data Storage
@@ -180,6 +202,7 @@ All application data is stored in `%LOCALAPPDATA%\Audiomatic\`:
 - `podcast_read.json` — Read/unread episode tracking
 - `podcast_progress.json` — Episode playback progress for resume
 - `podcasts/` — Downloaded podcast episodes
+- `play_history` table — Track play counts and durations (in `library.db`)
 
 ## Building
 

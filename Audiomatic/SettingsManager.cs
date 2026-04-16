@@ -33,7 +33,10 @@ public record AppSettings(
     float[]? EqBands = null,       // 10-band gains in dB (-12 to +12)
     float EqPreamp = 0f,
     string AccentColor = "",       // hex string, empty = system accent
-    int DurationDataVersion = 0);
+    int DurationDataVersion = 0,
+    int? OverlayX = null,
+    int? OverlayY = null,
+    int[]? TabOrder = null);
 
 public static class SettingsManager
 {
@@ -96,6 +99,21 @@ public static class SettingsManager
     {
         var current = Load();
         Save(current with { Theme = theme });
+    }
+
+    public static int[] LoadTabOrder()
+    {
+        var order = Load().TabOrder;
+        // Validate: must contain exactly 0..10 once each
+        if (order is { Length: 11 } && Enumerable.Range(0, 11).All(order.Contains))
+            return order;
+        return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    }
+
+    public static void SaveTabOrder(int[] order)
+    {
+        var current = Load();
+        Save(current with { TabOrder = order });
     }
 
     // -- Radio stations persistence --
